@@ -7,8 +7,12 @@ Dataiku Standard Webapp 의 backend.py 와 로컬 standalone 실행이
 
 from __future__ import annotations
 
+import inspect
+import io
 import json
 import logging
+import platform
+import sys
 from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import quote
 
@@ -39,17 +43,52 @@ SLIM_KEYS = (
 
 
 class AppState:
-    """웹앱 전역 상태(업로드/작업/저장소)."""
+    """웹앱 전역 상태(업로드/작업/저장소).
+
+    저장소 초기화가 실패해도 백엔드 전체가 죽지 않도록 오류를 보관하고,
+    ``/api/health`` 와 저장 관련 API 에서 **원인을 그대로** 알려 준다.
+    (오류를 숨기는 것이 아니라, 나머지 기능은 살린 채 원인을 화면에 노출한다.)
+    """
 
     def __init__(self, folder_id: Optional[str] = None, local_root: Optional[str] = None):
         self.jobs = JobManager()
         self.uploads = UploadStore()
-        self.store = ResultStore(make_backend(folder_id, local_root))
         self.llm_cache: Dict[str, Dict] = {}
+        self.folder_id = folder_id
+        self.local_root = local_root
+        self.store: Optional[ResultStore] = None
+        self.storage_error: Optional[str] = None
+        self.init_storage()
+
+    def init_storage(self) -> Optional[ResultStore]:
+        try:
+            self.store = ResultStore(make_backend(self.folder_id, self.local_root))
+            self.storage_error = None
+        except Exception as exc:
+            self.store = None
+            self.storage_error = "%s: %s" % (type(exc).__name__, exc)
+            logger.error("저장소 초기화 실패: %s", self.storage_error)
+        return self.store
+
+    def describe(self) -> str:
+        if self.store is None:
+            return "storage=ERROR(%s)" % self.storage_error
+        return "storage=%s at %s" % (self.store.backend.kind,
+                                     self.store.backend.describe().get("location"))
 
 
 def _error(message: str, code: int = 400):
     return jsonify({"ok": False, "error": message}), code
+
+
+def _store_or_error(state: "AppState"):
+    """(store, error_response) - 저장소를 쓸 수 없으면 원인을 담은 응답을 돌려준다."""
+    if state.store is not None:
+        return state.store, None
+    return None, _error(
+        "결과 저장소를 사용할 수 없습니다: %s\n"
+        "관리 폴더 ID(FOLDER_ID) 또는 저장 디렉터리 권한을 확인한 뒤 웹앱을 다시 시작하십시오."
+        % (state.storage_error or "원인 미상"), 503)
 
 
 def _json_body() -> Dict[str, Any]:
@@ -136,17 +175,70 @@ def _invert(text: str) -> str:
     return "".join(chr(0x10FFFF - ord(c)) if ord(c) < 0x10FFFF else c for c in text)
 
 
+def _send_file_kwarg() -> str:
+    """Flask 버전별 파일명 인자명.
+
+    Flask 2.0 부터 ``download_name``, 그 이전(DSS 내장 환경에 흔한 1.x)은
+    ``attachment_filename`` 이다. 예외로 감추지 않고 시그니처로 판별한다.
+    """
+    try:
+        parameters = inspect.signature(send_file).parameters
+    except (TypeError, ValueError):     # 서명 조회 불가(래핑된 구현) → 최신 인자 가정
+        return "download_name"
+    if "download_name" in parameters:
+        return "download_name"
+    if "attachment_filename" in parameters:
+        return "attachment_filename"
+    return "download_name"
+
+
+SEND_FILE_KWARG = _send_file_kwarg()
+
+
 def _download_response(data: bytes, filename: str):
-    import io
+    """다운로드 응답. 한글 파일명은 RFC 5987 헤더로 직접 지정한다."""
     stream = io.BytesIO(data)
     stream.seek(0)
-    response = send_file(stream, mimetype="application/octet-stream", as_attachment=True,
-                         download_name=filename)
-    # 한글 파일명 (RFC 5987)
+    extension = filename.rsplit(".", 1)[-1] if "." in filename else "bin"
+    # send_file 에는 ASCII 안전 이름만 넘기고(구버전 Flask 의 비ASCII 처리 차이 회피),
+    # 실제 한글 파일명은 아래에서 Content-Disposition 으로 덮어쓴다.
+    kwargs = {"mimetype": "application/octet-stream", "as_attachment": True,
+              SEND_FILE_KWARG: "result.%s" % extension}
+    response = send_file(stream, **kwargs)
     response.headers["Content-Disposition"] = \
-        "attachment; filename=\"result.%s\"; filename*=UTF-8''%s" % (
-            filename.rsplit(".", 1)[-1], quote(filename))
+        "attachment; filename=\"result.%s\"; filename*=UTF-8''%s" % (extension, quote(filename))
     return response
+
+
+def _package_version(name: str) -> Optional[str]:
+    """설치 여부/버전 조회. 없으면 None (구동 진단용).
+
+    Flask 3.1+ 에서 ``flask.__version__`` 이 폐기되었으므로
+    importlib.metadata 를 먼저 사용한다.
+    """
+    try:
+        __import__(name)
+    except Exception:
+        return None
+    try:
+        from importlib import metadata
+        return metadata.version(name)
+    except Exception:
+        pass
+    module = sys.modules.get(name)
+    version = getattr(module, "__version__", None) if module else None
+    return str(version) if version else "설치됨"
+
+
+def _environment_report() -> Dict[str, Any]:
+    return {
+        "python": platform.python_version(),
+        "flask": _package_version("flask"),
+        "sendFileKwarg": SEND_FILE_KWARG,
+        "packages": {name: _package_version(name)
+                     for name in ("pandas", "numpy", "openpyxl", "dataiku")},
+        "executable": sys.executable,
+    }
 
 
 def register_routes(app, state: Optional[AppState] = None) -> AppState:
@@ -161,10 +253,24 @@ def register_routes(app, state: Optional[AppState] = None) -> AppState:
     # ------------------------------------------------------------- 기본 정보
     @app.route("/api/health", methods=["GET"])
     def api_health():
+        """구동 진단용. 실패 원인(패키지 누락/저장소 오류)을 그대로 노출한다."""
+        environment = _environment_report()
+        degraded: List[str] = []
+        if state.storage_error:
+            degraded.append("저장소 사용 불가: %s" % state.storage_error)
+        for package in ("pandas", "openpyxl"):
+            if not environment["packages"].get(package):
+                degraded.append("%s 패키지가 없어 엑셀 읽기/쓰기가 동작하지 않습니다." % package)
         return jsonify({
             "ok": True,
             "app": "PrimePatent",
-            "storage": state.store.backend.kind,
+            "storage": state.store.backend.kind if state.store else "unavailable",
+            "storageLocation": (state.store.backend.describe().get("location")
+                                if state.store else None),
+            "storageNote": (state.store.backend.describe().get("note") if state.store else None),
+            "storageError": state.storage_error,
+            "environment": environment,
+            "degraded": degraded,
             "llmCandidates": [{"label": label, "id": llm_id}
                               for label, llm_id in ALLOWED_LLM_CANDIDATES],
             "defaultLlmId": DEFAULT_LLM_ID,
@@ -289,6 +395,9 @@ def register_routes(app, state: Optional[AppState] = None) -> AppState:
     def _payload(source: str, ident: str) -> Dict[str, Any]:
         if source == "job":
             return _payload_from_job(ident)
+        if state.store is None:
+            raise StorageError("결과 저장소를 사용할 수 없습니다: %s"
+                               % (state.storage_error or "원인 미상"))
         return state.store.load(ident)
 
     def _result_response(payload: Dict[str, Any]):
@@ -331,6 +440,9 @@ def register_routes(app, state: Optional[AppState] = None) -> AppState:
     # ------------------------------------------------------------- 저장소
     @app.route("/api/save", methods=["POST"])
     def api_save():
+        store, unavailable = _store_or_error(state)
+        if unavailable:
+            return unavailable
         body = _json_body()
         job_id = body.get("jobId")
         run_id = body.get("runId")
@@ -342,7 +454,7 @@ def register_routes(app, state: Optional[AppState] = None) -> AppState:
             return _error("저장할 결과(jobId 또는 runId)가 필요합니다.")
 
         try:
-            meta = state.store.save(
+            meta = store.save(
                 payload,
                 department=body.get("department", ""),
                 owner=body.get("owner", ""),
@@ -359,44 +471,56 @@ def register_routes(app, state: Optional[AppState] = None) -> AppState:
         try:
             payload_with_meta = dict(payload)
             payload_with_meta["meta"] = meta
-            state.store.put_artifact(meta["runId"], "result.xlsx",
-                                     export_bytes(payload_with_meta, "xlsx"))
+            store.put_artifact(meta["runId"], "result.xlsx",
+                               export_bytes(payload_with_meta, "xlsx"))
         except Exception as exc:
             logger.warning("엑셀 산출물 저장 실패(다운로드 시 재생성됨): %s", exc)
         return jsonify({"ok": True, "meta": meta})
 
     @app.route("/api/runs", methods=["GET"])
     def api_runs():
+        store, unavailable = _store_or_error(state)
+        if unavailable:
+            return unavailable
         try:
-            runs = state.store.list_runs(
+            runs = store.list_runs(
                 department=request.args.get("department", ""),
                 owner=request.args.get("owner", ""),
                 project=request.args.get("project", ""),
                 keyword=request.args.get("q", ""))
         except StorageError as exc:
             return _error(str(exc), 500)
-        return jsonify({"ok": True, "runs": runs, "facets": state.store.facets(),
-                        "storage": state.store.backend.kind})
+        return jsonify({"ok": True, "runs": runs, "facets": store.facets(),
+                        "storage": store.backend.kind})
 
     @app.route("/api/runs/<run_id>/result", methods=["GET"])
     def api_run_result(run_id):
+        _store, unavailable = _store_or_error(state)
+        if unavailable:
+            return unavailable
         try:
-            return _result_response(state.store.load(run_id))
+            return _result_response(_payload("run", run_id))
         except StorageError as exc:
             return _error(str(exc), 404)
 
     @app.route("/api/runs/<run_id>/row/<path:row_key>", methods=["GET"])
     def api_run_row(run_id, row_key):
+        _store, unavailable = _store_or_error(state)
+        if unavailable:
+            return unavailable
         try:
-            payload = state.store.load(run_id)
+            payload = _payload("run", run_id)
         except StorageError as exc:
             return _error(str(exc), 404)
         return _row_response(payload, row_key)
 
     @app.route("/api/runs/<run_id>", methods=["DELETE"])
     def api_run_delete(run_id):
+        store, unavailable = _store_or_error(state)
+        if unavailable:
+            return unavailable
         try:
-            state.store.delete(run_id)
+            store.delete(run_id)
         except StorageError as exc:
             return _error(str(exc), 404)
         return jsonify({"ok": True})
@@ -413,22 +537,27 @@ def register_routes(app, state: Optional[AppState] = None) -> AppState:
 
     @app.route("/api/runs/<run_id>/download", methods=["GET"])
     def api_run_download(run_id):
+        store, unavailable = _store_or_error(state)
+        if unavailable:
+            return unavailable
         fmt = (request.args.get("format") or "xlsx").lower()
         try:
-            payload = state.store.load(run_id)
+            payload = _payload("run", run_id)
         except StorageError as exc:
             return _error(str(exc), 404)
         if fmt == "xlsx":
-            cached = state.store.get_artifact(run_id, "result.xlsx")
+            cached = store.get_artifact(run_id, "result.xlsx")
             if cached:
                 return _download_response(cached, export_filename(payload, fmt))
         return _download_response(export_bytes(payload, fmt), export_filename(payload, fmt))
 
     @app.errorhandler(404)
-    def _not_found(_exc):
+    def _not_found(exc):
         if request.path.startswith("/api/"):
             return _error("존재하지 않는 API 경로입니다: %s" % request.path, 404)
-        return _exc, 404
+        # API 외 경로는 DSS/Flask 기본 처리에 맡긴다.
+        # (예외 객체를 그대로 반환하면 구버전 Flask 에서 500 이 된다)
+        return getattr(exc, "description", "Not Found"), 404
 
     @app.errorhandler(500)
     def _server_error(exc):

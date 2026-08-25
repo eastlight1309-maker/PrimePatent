@@ -108,7 +108,67 @@ python -m unittest discover -s tests -p "test_*.py" -v   # 단위 + 통합 (60�
 python tests/ui_smoke.py                                 # 브라우저 UI 스모크(Playwright, 서버 실행 필요)
 ```
 
-## 7. 주의사항
+## 7. 문제 해결 (Troubleshooting)
+
+### 7.1 `web_apps/XXXX.json` 의 `apiKey` 변경 diff 는 오류가 아닙니다
+
+```
+web_apps/ZLjnfbG.json   +1 −1
+-  "apiKey": "e:AES:X2:aU8hk0B9sb..."
++  "apiKey": "e:AES:X2:Elxe5H3c+hE..."
+```
+
+DSS 는 프로젝트를 내부 Git 으로 버전 관리하며, **웹앱을 저장/재시작할 때마다 백엔드
+호출용 API 키를 새로 발급**합니다. 위 diff 는 그 정상적인 변경 기록(`e:AES:` 는 DSS 암호화
+접두사)이며 앱 오류가 아닙니다. 커밋하거나 무시하면 됩니다.
+
+> 실제 오류 메시지는 **웹앱 화면의 [Log] 탭**(백엔드 기동 로그)에 표시됩니다.
+> 앱이 뜨지 않을 때는 반드시 이 로그와 아래 `/api/health` 결과를 확인하십시오.
+
+### 7.2 앱이 뜨지 않을 때 진단 순서
+
+1. 화면 상단에 붉은 **"백엔드 상태 확인 필요"** 배너가 있으면 그 내용이 곧 원인입니다.
+   `자세한 오류 내용` 을 펼치면 스택트레이스를 볼 수 있습니다.
+2. 브라우저에서 백엔드 상태를 직접 확인합니다(웹앱 URL 뒤에 붙임).
+
+   ```
+   .../api/health
+   ```
+
+   ```jsonc
+   {
+     "storage": "dataiku",              // unavailable 이면 저장소 문제
+     "storageLocation": "관리 폴더 PATENT_STORE",
+     "storageError": null,
+     "degraded": [],                    // 비어 있지 않으면 그 내용이 원인
+     "environment": {
+       "python": "3.9.x",
+       "flask": "1.1.4",
+       "sendFileKwarg": "attachment_filename",
+       "packages": {"pandas": "1.3.5", "openpyxl": "3.0.9", "numpy": "1.21.6", "dataiku": "설치됨"}
+     }
+   }
+   ```
+
+3. `/api/health` 가 **503** 과 함께 `PrimePatent 라이브러리를 불러오지 못했습니다` 를 반환하면
+   백엔드가 **진단 모드**로 뜬 것입니다. `detail` 의 트레이스가 정확한 원인입니다.
+
+### 7.3 증상별 원인
+
+| 증상 | 원인 | 조치 |
+|---|---|---|
+| 화면은 뜨지만 모든 API 가 실패 | 백엔드 미기동 | [Log] 탭 확인 → 아래 항목들 점검 |
+| `NameError: name '__file__' is not defined` | DSS 는 백엔드 코드를 문자열로 exec 하므로 `__file__` 이 없음 | 현재 `backend.py` 는 이 경우를 처리함(구버전을 붙여넣었다면 최신 파일로 교체) |
+| `ModuleNotFoundError: No module named 'primepatent'` | 프로젝트 라이브러리 미배치 | *Libraries → Python* 에 `python-lib/primepatent` 복사, 또는 환경변수 `PRIMEPATENT_LIB` 지정 |
+| `No module named 'pandas'` / `openpyxl` | 코드환경 패키지 누락 | 웹앱 Settings 의 코드환경에 `requirements.txt` 패키지 설치 |
+| `send_file() got an unexpected keyword argument 'download_name'` | Flask 1.x 환경 | 현재 코드가 버전을 자동 판별함(`environment.sendFileKwarg` 로 확인) |
+| 저장 시 `결과 저장소를 사용할 수 없습니다` | 관리 폴더 ID 오기재 또는 권한 없음 | `backend.py` 의 `FOLDER_ID` 확인, 폴더 접근 권한 부여 |
+| 저장은 되는데 재시작하면 사라짐 | 쓰기 불가로 임시 디렉터리로 폴백됨 | `/api/health` 의 `storageNote` 확인 후 관리 폴더 사용 |
+
+> 백엔드는 **저장소를 못 쓰더라도 분석 기능은 계속 동작**하도록 되어 있으며,
+> 저장 관련 API 만 원인을 담아 503 을 반환합니다.
+
+## 8. 주의사항
 
 - LLM 분석에 실패한 문헌은 **LLM 점수 0점**으로 처리되고 `notes` 에 사유가 남습니다.
   (점수를 임의로 보정하지 않습니다)

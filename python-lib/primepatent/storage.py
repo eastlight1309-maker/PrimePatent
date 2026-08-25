@@ -52,6 +52,10 @@ def safe_name(value: Any, limit: int = 80) -> str:
 # ---------------------------------------------------------------- backends
 class BaseBackend:
     kind = "base"
+    note: str = ""              # 폴백 사유 등 구동 진단용 메모
+
+    def describe(self) -> Dict[str, Any]:
+        return {"kind": self.kind, "location": "", "note": self.note}
 
     def read(self, path: str) -> Optional[bytes]:
         raise NotImplementedError
@@ -78,6 +82,9 @@ class LocalBackend(BaseBackend):
     def __init__(self, root: str):
         self.root = os.path.abspath(root)
         os.makedirs(self.root, exist_ok=True)
+
+    def describe(self) -> Dict[str, Any]:
+        return {"kind": self.kind, "location": self.root, "note": self.note}
 
     def _full(self, path: str) -> str:
         clean = path.replace("\\", "/").lstrip("/")
@@ -137,6 +144,9 @@ class DataikuFolderBackend(BaseBackend):
             else dataiku.Folder(folder_id)
         self.folder_id = folder_id
 
+    def describe(self) -> Dict[str, Any]:
+        return {"kind": self.kind, "location": "관리 폴더 %s" % self.folder_id, "note": self.note}
+
     @staticmethod
     def _norm(path: str) -> str:
         return "/" + path.replace("\\", "/").lstrip("/")
@@ -177,19 +187,51 @@ class DataikuFolderBackend(BaseBackend):
         return sorted(cleaned)
 
 
+def _is_writable(path: str) -> bool:
+    """디렉터리를 만들고 실제로 쓸 수 있는지 확인한다."""
+    try:
+        os.makedirs(path, exist_ok=True)
+        probe = os.path.join(path, ".pp_write_test")
+        with open(probe, "wb") as handle:
+            handle.write(b"1")
+        os.remove(probe)
+        return True
+    except OSError as exc:
+        logger.warning("저장 경로에 쓸 수 없습니다(%s): %s", path, exc)
+        return False
+
+
 def make_backend(folder_id: Optional[str] = None, local_root: Optional[str] = None) -> BaseBackend:
-    """환경에 맞는 백엔드를 만든다."""
+    """환경에 맞는 백엔드를 만든다.
+
+    관리 폴더 → 지정 디렉터리 → 임시 디렉터리 순으로 시도하며,
+    폴백이 발생하면 사유를 ``note`` 에 남겨 /api/health 에서 확인할 수 있게 한다.
+    """
+    note = ""
     folder_id = folder_id or os.environ.get("PRIMEPATENT_FOLDER_ID")
     if folder_id:
         try:
             return DataikuFolderBackend(folder_id)
         except ImportError:
-            logger.warning("dataiku 패키지가 없어 로컬 저장소를 사용합니다.")
+            note = "dataiku 패키지가 없어 로컬 디렉터리를 사용합니다(로컬 실행 환경)."
+            logger.warning(note)
         except Exception as exc:
-            logger.warning("관리 폴더(%s) 연결 실패 → 로컬 저장소 사용: %s", folder_id, exc)
+            note = "관리 폴더(%s) 연결 실패 → 로컬 디렉터리 사용: %s" % (folder_id, exc)
+            logger.warning(note)
+
     root = local_root or os.environ.get("PRIMEPATENT_STORE") or \
         os.path.join(os.getcwd(), ".primepatent_store")
-    return LocalBackend(root)
+    if not _is_writable(root):
+        import tempfile
+        fallback = os.path.join(tempfile.gettempdir(), "primepatent_store")
+        note = ("%s 경로에 쓸 수 없어 임시 디렉터리(%s)를 사용합니다. "
+                "서버 재시작 시 저장 결과가 사라질 수 있으므로 관리 폴더 사용을 권장합니다."
+                % (root, fallback))
+        logger.error(note)
+        root = fallback
+    backend = LocalBackend(root)
+    backend.note = note
+    return backend
 
 
 # ---------------------------------------------------------------- store

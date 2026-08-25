@@ -133,6 +133,13 @@ textarea.pp-input { resize: vertical; width: 100%; }
 .pp-status-warn { background: #fdf8ec; border: 1px solid #f0dfb8; color: #8a5f14; }
 .pp-status-err { background: #fdf1ef; border: 1px solid #f0c8c2; color: #97281b; }
 
+.pp-degraded { background: #fdf1ef; border: 1px solid #f0c8c2; border-radius: 5px;
+               padding: 10px 14px; margin-bottom: 12px; font-size: 12px; color: #97281b; }
+.pp-degraded ul { margin: 6px 0 0 16px; padding: 0; }
+.pp-degraded pre { white-space: pre-wrap; word-break: break-all; font-size: 11px;
+                   background: #fff; border: 1px solid #f0c8c2; border-radius: 4px;
+                   padding: 8px; max-height: 240px; overflow: auto; }
+
 .pp-warnings { background: #fdf8ec; border: 1px solid #f0dfb8; border-radius: 5px;
                padding: 10px 14px; margin-bottom: 12px; font-size: 12px; color: #7a5610; }
 .pp-warnings ul { margin: 4px 0 0 16px; padding: 0; }

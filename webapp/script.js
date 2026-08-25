@@ -23,7 +23,10 @@
         throw new Error("서버 응답을 해석할 수 없습니다 (HTTP " + response.status + ")");
       }).then(function (data) {
         if (!response.ok || data.ok === false) {
-          throw new Error(data.error || ("요청 실패 (HTTP " + response.status + ")"));
+          var failure = new Error(data.error || ("요청 실패 (HTTP " + response.status + ")"));
+          failure.detail = data.detail || null;
+          failure.status = response.status;
+          throw failure;
         }
         return data;
       });
@@ -43,6 +46,23 @@
     if (value === null || value === undefined || value === "") return "-";
     var parsed = Number(value);
     return isNaN(parsed) ? esc(value) : parsed.toFixed(digits === undefined ? 1 : digits);
+  }
+
+  function showDegraded(messages, detail) {
+    var box = $("pp-degraded");
+    var list = $("pp-degraded-list");
+    list.innerHTML = "";
+    (messages || []).forEach(function (message) {
+      if (message) list.appendChild(el("li", null, message));
+    });
+    box.hidden = !list.childNodes.length;
+    var wrap = $("pp-degraded-detail");
+    if (detail) {
+      $("pp-degraded-trace").textContent = detail;
+      wrap.hidden = false;
+    } else {
+      wrap.hidden = true;
+    }
   }
 
   var toastTimer = null;
@@ -98,10 +118,23 @@
 
     request("/api/health").then(function (data) {
       state.health = data;
-      $("pp-storage-badge").textContent = "저장소: " +
-        (data.storage === "dataiku" ? "Dataiku 관리 폴더" : "로컬 디렉터리");
-      $("pp-storage-badge").className = "pp-badge " +
-        (data.storage === "dataiku" ? "pp-badge-ok" : "pp-badge-warn");
+      var badge = $("pp-storage-badge");
+      if (data.storage === "dataiku") {
+        badge.textContent = "저장소: Dataiku 관리 폴더";
+        badge.className = "pp-badge pp-badge-ok";
+      } else if (data.storage === "unavailable") {
+        badge.textContent = "저장소 사용 불가";
+        badge.className = "pp-badge pp-badge-err";
+      } else {
+        badge.textContent = "저장소: 로컬 디렉터리";
+        badge.className = "pp-badge pp-badge-warn";
+      }
+      badge.title = data.storageLocation || "";
+
+      var problems = (data.degraded || []).slice();
+      if (data.storageNote) problems.push(data.storageNote);
+      showDegraded(problems, null);
+
       var select = $("cfg-llm-id");
       data.llmCandidates.forEach(function (candidate) {
         var option = el("option", null, candidate.label);
@@ -112,7 +145,15 @@
       buildWeightInputs(data.defaultConfig);
       applyConfig(data.defaultConfig);
       probeLlm(true);
-    }).catch(function (error) { toast("초기화 실패: " + error.message, "err"); });
+    }).catch(function (error) {
+      // 백엔드가 기동하지 못한 경우(진단 모드/미기동)에도 원인을 화면에 남긴다.
+      showDegraded(["백엔드에 연결하지 못했습니다: " + error.message,
+                    "DSS 웹앱의 [Log] 탭에서 백엔드 기동 로그를 확인하십시오."],
+                   error.detail);
+      $("pp-storage-badge").textContent = "백엔드 미기동";
+      $("pp-storage-badge").className = "pp-badge pp-badge-err";
+      toast("초기화 실패: " + error.message, "err");
+    });
 
     request("/api/fields").then(function (data) { state.fields = data.fields; })
       .catch(function () { /* 매핑 화면에서 재시도 */ });

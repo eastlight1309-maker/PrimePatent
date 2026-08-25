@@ -5,7 +5,7 @@
 
 | 메서드 | 경로 | 설명 |
 |---|---|---|
-| GET | `/api/health` | 저장소 종류, 허용 LLM 목록, 기본 설정, 배점표 |
+| GET | `/api/health` | 구동 진단(저장소 상태·환경·degraded), 허용 LLM 목록, 기본 설정, 배점표 |
 | GET | `/api/fields` | 표준 필드 카탈로그(라벨/별칭/필수 여부) |
 | GET | `/api/llm/probe?llmId=` | LLM 연결 점검 |
 | POST | `/api/upload` | 파일 업로드(multipart `file`) → 헤더·미리보기·자동매핑 |
@@ -24,6 +24,14 @@
 | GET | `/api/runs/<runId>/row/<key>` | 저장 결과 문헌 상세 |
 | GET | `/api/runs/<runId>/download?format=` | 저장 결과 다운로드 |
 | DELETE | `/api/runs/<runId>` | 저장 결과 삭제 |
+
+## 상태 코드
+
+| 코드 | 의미 |
+|---|---|
+| 400 | 입력 오류(필수 항목 누락, 지원하지 않는 파일 등) |
+| 404 | 대상 없음(만료된 작업, 존재하지 않는 저장 결과) |
+| 503 | 저장소 사용 불가 또는 백엔드 진단 모드 — 응답의 `error`/`detail` 이 원인 |
 
 ## 결과 목록 쿼리 파라미터
 
