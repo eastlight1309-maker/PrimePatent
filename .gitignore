@@ -8,6 +8,6 @@ venv/
 .primepatent_cache/
 *.egg-info/
 build/
-dist/
+
 .pytest_cache/
 tmp/

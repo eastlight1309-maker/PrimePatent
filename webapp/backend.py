@@ -2,11 +2,19 @@
 """Dataiku Standard Webapp 백엔드.
 
 DSS 웹앱 편집기의 [Python backend] 탭에 이 파일 내용을 그대로 붙여넣는다.
-DSS 는 이 코드를 **문자열로 exec** 하므로 다음 두 가지를 전제할 수 없다.
-  - ``__file__`` 이 정의되어 있다  (정의되지 않는다 → NameError 로 백엔드 기동 실패)
-  - 모듈 import 가 항상 성공한다   (실패하면 모든 API 가 죽어 화면이 비어 보인다)
-따라서 경로 보강은 ``__file__`` 없이 수행하고, 라이브러리 import 나 저장소 초기화가
-실패하면 원인을 그대로 알려 주는 진단용 라우트를 대신 등록한다(오류를 숨기지 않는다).
+DSS 는 이 코드를 ``exec(code, globals(), globals())`` 로 **DSS 자신의 모듈 전역에서**
+실행한다(dataiku/webapps/backend.py). 따라서
+  - ``__file__`` 은 없거나, 있어도 **DSS 자신의 경로**를 가리킨다.
+    → 이 값으로 프로젝트 경로를 유추하면 안 된다.
+  - 프로젝트 라이브러리가 sys.path 에 없으면 import 가 실패한다.
+    → 이때 조용히 죽지 말고 **어디를 찾아봤는지**까지 알려 주어야 한다.
+
+primepatent 패키지를 찾는 순서
+  1) 이미 sys.path 에 있음 (DSS 프로젝트 라이브러리 정상 배치 시)
+  2) 환경변수 PRIMEPATENT_LIB
+  3) $DIP_HOME/config/projects/<PROJECT_KEY>/lib/python   (프로젝트 라이브러리 실제 경로)
+  4) $DIP_HOME/lib/python                                  (인스턴스 공용 라이브러리)
+위 어디에도 없으면 dist/backend_bundle.py (단일 파일 번들) 사용을 권한다.
 
 저장소(관리 폴더) 지정 방법 (우선순위)
  1) 아래 FOLDER_ID 상수에 관리 폴더 ID 직접 입력
@@ -25,26 +33,39 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("primepatent.backend")
 
 
-def _library_candidates():
-    """primepatent 패키지를 찾을 후보 경로.
+def _project_key():
+    """현재 프로젝트 키. 환경변수 → dataiku API 순으로 조회한다."""
+    key = os.environ.get("DKU_CURRENT_PROJECT_KEY")
+    if key:
+        return key
+    try:
+        import dataiku
+        return dataiku.default_project_key()
+    except Exception:
+        return None
 
-    DSS 에서는 프로젝트 라이브러리(python-lib)가 자동으로 sys.path 에 포함되므로
-    보통 추가 경로가 필요 없다. 아래는 그렇지 않은 배치를 위한 보조 경로이며,
-    ``__file__`` 이 없을 수 있으므로 globals() 에서 안전하게 조회한다.
+
+def _library_candidates():
+    """primepatent 패키지를 찾을 후보 경로 목록.
+
+    ``__file__`` 은 DSS 자신의 경로를 가리키므로 사용하지 않는다.
     """
     candidates = [os.environ.get("PRIMEPATENT_LIB")]
-    here = globals().get("__file__")
-    if here:
-        candidates.append(os.path.join(os.path.dirname(os.path.abspath(here)), "..", "python-lib"))
-    for name in ("DIP_HOME", "DKU_CURRENT_PROJECT_KEY"):
-        base = os.environ.get(name)
-        if name == "DIP_HOME" and base:
-            candidates.append(os.path.join(base, "lib", "python"))
+    dip_home = os.environ.get("DIP_HOME")
+    if dip_home:
+        key = _project_key()
+        if key:
+            candidates.append(os.path.join(dip_home, "config", "projects", key, "lib", "python"))
+        candidates.append(os.path.join(dip_home, "lib", "python"))
     return [c for c in candidates if c]
 
 
+_SEARCHED = []
 for _candidate in _library_candidates():
     _path = os.path.abspath(_candidate)
+    _found = os.path.isdir(os.path.join(_path, "primepatent"))
+    _SEARCHED.append("%s (%s)" % (_path, "패키지 있음" if _found else
+                                  ("디렉터리 없음" if not os.path.isdir(_path) else "primepatent 없음")))
     if os.path.isdir(_path) and _path not in sys.path:
         sys.path.insert(0, _path)
 
@@ -56,21 +77,36 @@ except Exception:                       # ImportError 외 의존 패키지 오�
     logger.error("primepatent 라이브러리를 불러오지 못했습니다.\n%s", _IMPORT_ERROR)
 
 
+def _diagnosis(detail):
+    """실패 원인과 '어디를 찾아봤는지' 를 함께 담은 진단 정보."""
+    return {
+        "ok": False,
+        "error": ("PrimePatent 라이브러리(primepatent)를 불러오지 못했습니다. "
+                  "DSS 프로젝트 라이브러리의 python/ 폴더에 primepatent 패키지를 배치하거나, "
+                  "dist/backend_bundle.py (단일 파일 번들)를 [Python backend] 탭에 붙여넣으십시오."),
+        "detail": detail,
+        "searchedPaths": _SEARCHED,
+        "projectKey": _project_key(),
+        "dipHome": os.environ.get("DIP_HOME"),
+        "pythonExecutable": sys.executable,
+        "sysPathHead": sys.path[:12],
+    }
+
+
 def _register_diagnostic_routes(flask_app, detail):
-    """백엔드가 정상 기동하지 못했을 때, 원인을 화면에서 확인할 수 있게 한다."""
+    """백엔드가 정상 기동하지 못했을 때, 원인을 화면·API 에서 확인할 수 있게 한다."""
     from flask import jsonify
 
-    message = ("PrimePatent 라이브러리를 불러오지 못했습니다. "
-               "DSS 프로젝트 라이브러리(python-lib)에 primepatent 패키지가 있는지, "
-               "코드환경에 pandas/openpyxl/Flask 가 설치되어 있는지 확인하십시오.")
+    payload = _diagnosis(detail)
 
     def _fail():
-        return jsonify({"ok": False, "error": message, "detail": detail}), 503
+        return jsonify(payload), 503
 
     for rule in ("/api/health", "/api/fields", "/api/runs", "/api/upload", "/api/analyze"):
         flask_app.add_url_rule(rule, "pp_diag_%s" % rule.strip("/").replace("/", "_"),
                                _fail, methods=["GET", "POST"])
-    logger.error("PrimePatent 백엔드가 진단 모드로 기동했습니다.")
+    logger.error("PrimePatent 백엔드가 진단 모드로 기동했습니다. 탐색한 경로: %s",
+                 " | ".join(_SEARCHED) or "(없음)")
 
 
 state = None

@@ -93,8 +93,23 @@ class DssBackendStartupTest(unittest.TestCase):
         self.assertEqual(response.status_code, 503)
         payload = response.get_json()
         self.assertFalse(payload["ok"])
-        self.assertIn("python-lib", payload["error"])
+        self.assertIn("primepatent", payload["error"])
+        self.assertIn("backend_bundle.py", payload["error"])   # 대안 배포 방법 안내
         self.assertIn("ModuleNotFoundError", payload["detail"])
+        # 원인 파악에 필요한 "어디를 찾아봤는지" 가 함께 와야 한다
+        self.assertIn("searchedPaths", payload)
+        self.assertIsInstance(payload["searchedPaths"], list)
+        self.assertIn("sysPathHead", payload)
+
+    def test_searched_paths_include_dss_project_library(self):
+        """DSS 실제 라이브러리 경로($DIP_HOME/config/projects/<KEY>/lib/python)를 탐색해야 한다."""
+        app = Flask("dss_paths")
+        namespace = exec_backend(app, {"DIP_HOME": "/dataiku/design",
+                                       "DKU_CURRENT_PROJECT_KEY": "PRIMEPATENT",
+                                       "PRIMEPATENT_LIB": ""}, with_lib=False)
+        searched = " ".join(namespace["_SEARCHED"])
+        self.assertIn("/dataiku/design/config/projects/PRIMEPATENT/lib/python", searched)
+        self.assertIn("/dataiku/design/lib/python", searched)
 
     def test_library_path_env_is_honored(self):
         app = Flask("dss_libpath")

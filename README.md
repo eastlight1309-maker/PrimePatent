@@ -36,6 +36,10 @@ PrimePatent/
 │  ├─ storage.py               결과 저장소(관리 폴더 / 로컬)
 │  ├─ export.py                엑셀·CSV 내보내기
 │  └─ webapp_routes.py         REST API
+├─ dist/backend_bundle.py      DSS 백엔드 단일 파일 번들(자동 생성물)
+├─ tools/
+│  ├─ build_backend_bundle.py  번들 생성기
+│  └─ deploy_to_dss.py         프로젝트 라이브러리 업로드 도구
 ├─ run_local.py                로컬 standalone 실행(개발/검증용)
 ├─ tests/                      단위·통합·UI 테스트
 └─ docs/                       배포 및 스코어링 상세 문서
@@ -43,17 +47,51 @@ PrimePatent/
 
 ## 2. Dataiku 배포
 
+공통 준비
 1. **코드환경**: `pandas`, `numpy`, `openpyxl`, `Flask` 설치 (`requirements.txt` 참고)
-2. **프로젝트 라이브러리**: `python-lib/primepatent/` 를 DSS 프로젝트의
-   *Libraries → Python* 에 그대로 복사
-3. **관리 폴더** 생성(예: ID `PATENT_STORE`) — 결과 저장소로 사용
-4. **웹앱 생성**: `Webapps → New → Standard`
+2. **관리 폴더** 생성(예: ID `PATENT_STORE`) — 결과 저장소로 사용(선택)
+3. **웹앱 생성**: `Webapps → New → Standard`, Settings 에서 **Python backend 활성화**
    - HTML 탭 ← `webapp/body.html`
    - CSS 탭 ← `webapp/style.css`
    - JS 탭 ← `webapp/script.js`
-   - Python 탭 ← `webapp/backend.py` (파일 상단 `FOLDER_ID` 에 관리 폴더 ID 입력)
-   - Settings 에서 **Python backend 활성화**
-5. LLM 은 **LLM Mesh** 에 등록된 아래 4개만 사용합니다(`config.py` 고정).
+
+Python backend 탭은 아래 **A 또는 B** 중 하나를 선택합니다.
+
+### 방법 A — 단일 파일 번들 (가장 간단, 프로젝트 라이브러리 불필요)
+
+`dist/backend_bundle.py` **전체를 [Python backend] 탭에 붙여넣고** 저장합니다.
+패키지 29개 모듈이 파일 안에 압축 포함되어 있어 별도 배치가 필요 없습니다.
+관리 폴더를 쓰려면 파일 상단 `PRIMEPATENT_FOLDER_ID` 에 폴더 ID 를 입력하십시오.
+
+```bash
+python tools/build_backend_bundle.py   # 소스 수정 후 번들 재생성
+```
+
+### 방법 B — 프로젝트 라이브러리 배치 (권장, 유지보수 용이)
+
+`python-lib/primepatent/` 를 DSS 프로젝트 라이브러리의 **`python/` 폴더 아래**에 둡니다.
+(DSS 화면: 프로젝트 → `</>` **Libraries** → `python/` → `primepatent/` 생성)
+실제 서버 경로는 `$DIP_HOME/config/projects/<PROJECT_KEY>/lib/python/primepatent` 입니다.
+
+API 로 한 번에 올리려면:
+
+```bash
+export DSS_URL=https://dss.example.com
+export DSS_API_KEY=<개인 API 키>
+python tools/deploy_to_dss.py --project PRIMEPATENT           # 미리보기
+python tools/deploy_to_dss.py --project PRIMEPATENT --apply   # 실제 업로드
+```
+
+그 다음 [Python backend] 탭에는 `webapp/backend.py` 를 붙여넣고
+`FOLDER_ID` 에 관리 폴더 ID 를 입력합니다.
+
+> **중요**: `primepatent` 패키지가 `python/` 아래에 없으면
+> `ModuleNotFoundError: No module named 'primepatent'` 로 백엔드가 기동하지 않습니다.
+> 이때 `/api/health` 는 503 과 함께 **탐색한 경로 목록**을 알려 줍니다(7.3 참조).
+
+### LLM
+
+LLM 은 **LLM Mesh** 에 등록된 아래 4개만 사용합니다(`config.py` 고정).
 
 | 표시명 | LLM ID |
 |---|---|
@@ -104,9 +142,13 @@ python tests/make_sample.py tmp/wips_sample.xlsx 120   # 테스트용 모사 데
 ## 6. 테스트
 
 ```bash
-python -m unittest discover -s tests -p "test_*.py" -v   # 단위 + 통합 (60건)
+python -m unittest discover -s tests -p "test_*.py" -v   # 단위 + 통합 + DSS 기동 회귀 (73건)
 python tests/ui_smoke.py                                 # 브라우저 UI 스모크(Playwright, 서버 실행 필요)
+python tools/build_backend_bundle.py --check             # 번들이 소스와 동기화됐는지 확인
 ```
+
+> `python-lib/` 를 수정하면 **`python tools/build_backend_bundle.py` 로 번들을 재생성**해야
+> 방법 A 로 배포한 웹앱에 반영됩니다(테스트가 동기화 여부를 검사합니다).
 
 ## 7. 문제 해결 (Troubleshooting)
 
@@ -150,16 +192,32 @@ DSS 는 프로젝트를 내부 Git 으로 버전 관리하며, **웹앱을 저�
    }
    ```
 
-3. `/api/health` 가 **503** 과 함께 `PrimePatent 라이브러리를 불러오지 못했습니다` 를 반환하면
-   백엔드가 **진단 모드**로 뜬 것입니다. `detail` 의 트레이스가 정확한 원인입니다.
+3. `/api/health` 가 **503** 을 반환하면 백엔드가 **진단 모드**로 뜬 것입니다.
+   응답에 원인과 함께 **어디를 찾아봤는지**가 들어 있습니다.
+
+   ```jsonc
+   {
+     "error": "PrimePatent 라이브러리(primepatent)를 불러오지 못했습니다. ...",
+     "detail": "Traceback ... ModuleNotFoundError: No module named 'primepatent'",
+     "searchedPaths": [
+       "/dataiku/design/config/projects/PRIMEPATENT/lib/python (primepatent 없음)",
+       "/dataiku/design/lib/python (디렉터리 없음)"
+     ],
+     "projectKey": "PRIMEPATENT",
+     "dipHome": "/dataiku/design"
+   }
+   ```
+
+   `searchedPaths` 에 `패키지 있음` 이 하나도 없으면 라이브러리가 배치되지 않은 것입니다.
+   백엔드 기동 로그([Log] 탭)에도 같은 경로 목록이 남습니다.
 
 ### 7.3 증상별 원인
 
 | 증상 | 원인 | 조치 |
 |---|---|---|
 | 화면은 뜨지만 모든 API 가 실패 | 백엔드 미기동 | [Log] 탭 확인 → 아래 항목들 점검 |
-| `NameError: name '__file__' is not defined` | DSS 는 백엔드 코드를 문자열로 exec 하므로 `__file__` 이 없음 | 현재 `backend.py` 는 이 경우를 처리함(구버전을 붙여넣었다면 최신 파일로 교체) |
-| `ModuleNotFoundError: No module named 'primepatent'` | 프로젝트 라이브러리 미배치 | *Libraries → Python* 에 `python-lib/primepatent` 복사, 또는 환경변수 `PRIMEPATENT_LIB` 지정 |
+| `Backend died before startup complete` + `ModuleNotFoundError: No module named 'primepatent'` | **프로젝트 라이브러리 미배치** (가장 흔함) | 방법 A(번들 붙여넣기) 또는 방법 B(라이브러리 배치) 수행 |
+| `NameError: name '__file__' is not defined` | DSS 가 백엔드 코드를 문자열로 exec | 현재 `backend.py` 는 `__file__` 에 의존하지 않음(구버전을 붙여넣었다면 최신으로 교체) |
 | `No module named 'pandas'` / `openpyxl` | 코드환경 패키지 누락 | 웹앱 Settings 의 코드환경에 `requirements.txt` 패키지 설치 |
 | `send_file() got an unexpected keyword argument 'download_name'` | Flask 1.x 환경 | 현재 코드가 버전을 자동 판별함(`environment.sendFileKwarg` 로 확인) |
 | 저장 시 `결과 저장소를 사용할 수 없습니다` | 관리 폴더 ID 오기재 또는 권한 없음 | `backend.py` 의 `FOLDER_ID` 확인, 폴더 접근 권한 부여 |
