@@ -56,6 +56,18 @@ TAIL_COLUMNS = [
 ]
 
 
+# 엑셀/CSV 수식 인젝션 방지: 아래 문자로 시작하는 문자열은 Excel 이 수식으로 해석한다.
+# (업로드된 특허 명칭·출원인 등이 그대로 결과 파일에 들어가므로 내보내기 시점에 차단한다)
+_FORMULA_PREFIXES = ("=", "+", "-", "@", "\t", "\r")
+
+
+def safe_cell(value: Any) -> Any:
+    """수식으로 해석될 수 있는 문자열 앞에 작은따옴표를 붙여 텍스트로 고정한다."""
+    if not isinstance(value, str) or not value:
+        return value
+    return "'" + value if value[0] in _FORMULA_PREFIXES else value
+
+
 def flatten_row(row: Dict[str, Any]) -> Dict[str, Any]:
     """결과 1행 → 평면 dict(엑셀 1행)."""
     flat: Dict[str, Any] = {}
@@ -88,7 +100,7 @@ def flatten_row(row: Dict[str, Any]) -> Dict[str, Any]:
     flat["LLM 판단근거"] = llm.get("rationale")
     flat["주의사항"] = " / ".join(row.get("notes") or [])[:2000]
     flat["상세보기 링크"] = row.get("detailLink")
-    return flat
+    return {key: safe_cell(value) for key, value in flat.items()}
 
 
 def result_columns() -> List[str]:
@@ -192,14 +204,14 @@ def _summary_rows(payload: Dict[str, Any]) -> List[List[Any]]:
         rows.append([route, count])
     for warning in payload.get("warnings") or []:
         rows.append(["경고", warning])
-    return rows
+    return [[safe_cell(cell) for cell in row] for row in rows]
 
 
 def _mapping_rows(payload: Dict[str, Any]) -> List[List[Any]]:
     rows = []
     for field_key, info in (payload.get("mapping") or {}).items():
         spec = FIELD_BY_KEY.get(field_key)
-        rows.append([spec.label if spec else field_key, info.get("column"),
+        rows.append([safe_cell(spec.label if spec else field_key), safe_cell(info.get("column")),
                      info.get("method"), info.get("confidence")])
     return sorted(rows, key=lambda r: str(r[0]))
 
@@ -211,9 +223,10 @@ def _detail_rows(payload: Dict[str, Any], limit: int = 300) -> List[List[Any]]:
             for component in area.get("components", []):
                 detail = component.get("detail") or {}
                 brief = ", ".join("%s=%s" % (k, _brief(v)) for k, v in list(detail.items())[:6])
-                rows.append([row.get("docNumber"), component.get("label"),
+                rows.append([safe_cell(row.get("docNumber")), component.get("label"),
                              component.get("score"), COMPONENT_MAX.get(component.get("key")),
-                             brief[:500], " / ".join(component.get("notes") or [])[:300]])
+                             safe_cell(brief[:500]),
+                             safe_cell(" / ".join(component.get("notes") or [])[:300])])
     return rows
 
 

@@ -8,6 +8,7 @@ import json
 import logging
 import re
 import threading
+from collections import OrderedDict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, Callable, Dict, List, Optional, Sequence
 
@@ -26,6 +27,40 @@ SCORE_BOUNDS = {
     "effectEvidenceScore": (0.0, 3.0),
     "generalityScore": (0.0, 4.0),
 }
+
+
+class LLMCache:
+    """LLM 분석 결과 캐시.
+
+    여러 분석 작업이 하나의 캐시를 공유하므로 **캐시 자체가 락을 갖는다.**
+    (분석기마다 별도 락을 두면 같은 dict 를 서로 다른 락으로 보호하게 되어
+     read-modify-write 가 겹치고 동일 문헌을 중복 호출할 수 있다)
+    크기 상한을 두어 장시간 구동 시 메모리가 무한히 늘지 않게 한다.
+    """
+
+    def __init__(self, max_entries: int = 20000):
+        self.max_entries = max(100, int(max_entries))
+        self._data: "OrderedDict[str, Dict[str, Any]]" = OrderedDict()
+        self._lock = threading.Lock()
+
+    def get(self, key: str) -> Optional[Dict[str, Any]]:
+        with self._lock:
+            value = self._data.get(key)
+            if value is not None:
+                self._data.move_to_end(key)          # 최근 사용 항목을 뒤로
+                return dict(value)
+        return None
+
+    def put(self, key: str, value: Dict[str, Any]) -> None:
+        with self._lock:
+            self._data[key] = dict(value)
+            self._data.move_to_end(key)
+            while len(self._data) > self.max_entries:
+                self._data.popitem(last=False)       # 가장 오래된 항목 제거
+
+    def __len__(self) -> int:
+        with self._lock:
+            return len(self._data)
 
 
 def analysis_defaults(status: str = "skipped", message: str = "") -> Dict[str, Any]:
@@ -141,15 +176,14 @@ class LLMAnalyzer:
 
     def __init__(self, client: BaseLLMClient, topic_name: str = "", topic_description: str = "",
                  topic_keywords: Optional[Sequence[str]] = None, char_limit: int = 6000,
-                 max_workers: int = 4, cache: Optional[Dict[str, Dict]] = None):
+                 max_workers: int = 4, cache: Optional[LLMCache] = None):
         self.client = client
         self.topic_name = topic_name
         self.topic_description = topic_description
         self.topic_keywords = list(topic_keywords or [])
         self.char_limit = char_limit
         self.max_workers = max(1, int(max_workers))
-        self.cache = cache if cache is not None else {}
-        self._cache_lock = threading.Lock()
+        self.cache = cache if cache is not None else LLMCache()
         self.stats = {"total": 0, "ok": 0, "error": 0, "cached": 0}
 
     @property
@@ -158,10 +192,8 @@ class LLMAnalyzer:
 
     def analyze_one(self, document: Dict[str, Any]) -> Dict[str, Any]:
         fingerprint = document_fingerprint(document, self.topic_signature, self.client.llm_id)
-        with self._cache_lock:
-            cached = self.cache.get(fingerprint)
+        cached = self.cache.get(fingerprint)
         if cached is not None:
-            cached = dict(cached)
             cached["cached"] = True
             return cached
 
@@ -188,8 +220,7 @@ class LLMAnalyzer:
         analysis["provider"] = result.provider
         analysis["llmId"] = result.llm_id
         analysis["elapsedMs"] = result.elapsed_ms
-        with self._cache_lock:
-            self.cache[fingerprint] = dict(analysis)
+        self.cache.put(fingerprint, analysis)
         return analysis
 
     def analyze_many(self, documents: List[Dict[str, Any]],

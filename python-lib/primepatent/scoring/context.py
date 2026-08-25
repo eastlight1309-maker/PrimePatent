@@ -28,13 +28,23 @@ def digits_key(value: Any) -> str:
 
 
 class AnalysisContext:
-    """전체 모집단에서 1회 계산해 두는 통계."""
+    """전체 모집단에서 1회 계산해 두는 통계.
+
+    ``records``      : 업로드된 전체 문헌. 인용 문헌번호 → 출원인 해석과
+                       출원인 포트폴리오 통계에 사용한다.
+    ``peer_records`` : 백분위 비교집단을 구성할 문헌(기본값은 records).
+                       패밀리 중복 제거를 켠 경우 **채점 단위(대표문헌)** 를 넘겨야 한다.
+                       그러지 않으면 6개국에 출원된 패밀리가 분포에 6번 반영되어
+                       백분위가 왜곡된다(동일 발명이 비교집단을 지배).
+    """
 
     def __init__(self, records: Sequence[Dict[str, Any]], config: ScoringConfig,
-                 as_of: Optional[date] = None):
+                 as_of: Optional[date] = None,
+                 peer_records: Optional[Sequence[Dict[str, Any]]] = None):
         self.config = config
         self.as_of = as_of or date.today()
         self.records = list(records)
+        self.peer_records = list(peer_records) if peer_records is not None else self.records
         self.peers = PeerSet(config.peer_min_size, config.peer_year_window)
         self.applicant_family_count: Dict[str, int] = {}
         self.applicant_recent_count: Dict[str, int] = {}
@@ -109,7 +119,7 @@ class AnalysisContext:
             "priorityOrdinal": self.priority_ordinal,
             "familyCountryCount": lambda r: (r.get("_family") or {}).get("countryCount"),
         }
-        self.peers.build(self.records, metrics, self.topic_of, self.year_of)
+        self.peers.build(self.peer_records, metrics, self.topic_of, self.year_of)
 
     # ------------------------------------------------------------------ metric helpers
     def citation_speed(self, record: Dict[str, Any]) -> Optional[float]:

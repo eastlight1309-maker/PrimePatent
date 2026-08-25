@@ -180,11 +180,14 @@ def score_records(records: Sequence[Dict[str, Any]], analyses: Dict[str, Dict[st
                   population: Optional[Sequence[Dict[str, Any]]] = None) -> Dict[str, Any]:
     """채점 대상 목록을 채점하고 순위를 매긴다.
 
-    population 을 주면 비교집단 통계는 모집단 전체로 계산하고,
-    채점/출력은 records(대표문헌) 에 대해서만 수행한다.
+    population 을 주면 인용 해석·출원인 통계는 모집단 전체로 계산하되,
+    백분위 비교집단은 **채점 단위(records)** 로 구성한다.
+    (패밀리 대표문헌만 채점하면서 비교집단만 전체 문헌으로 두면,
+     다국 출원 패밀리가 분포를 지배해 백분위가 왜곡된다)
     """
     as_of = as_of or (_parse_as_of(config.as_of_date) or date.today())
-    ctx = AnalysisContext(population if population is not None else records, config, as_of)
+    ctx = AnalysisContext(population if population is not None else records, config, as_of,
+                          peer_records=records)
 
     rows = [score_one(record, analyses.get(record.get("_key")), ctx) for record in records]
     rows.sort(key=lambda r: (-r["totalScore"], r.get("docNumber") or ""))

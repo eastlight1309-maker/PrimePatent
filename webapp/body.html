@@ -16,6 +16,7 @@
     <button class="pp-tab" data-tab="config" type="button" disabled>3. 분석 설정</button>
     <button class="pp-tab" data-tab="result" type="button" disabled>4. 결과</button>
     <button class="pp-tab" data-tab="library" type="button">5. 저장소</button>
+    <button class="pp-tab pp-tab-help" data-tab="guide" type="button">? 설명</button>
   </nav>
 
   <div id="pp-toast" class="pp-toast" hidden></div>
@@ -256,6 +257,68 @@
           <tbody></tbody>
         </table>
       </div>
+    </div>
+  </section>
+
+  <!-- ------------------------------------------------ 6. 설명 -->
+  <section class="pp-panel" data-panel="guide">
+    <div class="pp-card">
+      <h2>이 앱은 무엇을 하나</h2>
+      <p class="pp-guide-lead">
+        윈텔립스(WIPS ON)에서 내려받은 특허 목록을 읽어, 각 특허가 <b>우리 주제에서 얼마나 핵심적인가</b>를
+        100점으로 채점하고 순위를 매깁니다. 점수는 엑셀에서 바로 계산할 수 있는 <b>정량 지표</b>와
+        청구항·요약을 읽어야 판단할 수 있는 <b>LLM 분석</b>을 합쳐서 냅니다.
+      </p>
+      <div id="pp-guide-split" class="pp-split"></div>
+      <div id="pp-guide-steps" class="pp-steps"></div>
+    </div>
+
+    <div class="pp-card">
+      <h2>총점은 어떻게 구성되나</h2>
+      <p class="pp-help">
+        4개 평가영역, 18개 세부지표로 나뉩니다. 아래 표의 배점과 산출식은
+        실제 계산 코드에서 그대로 읽어온 값입니다.
+      </p>
+      <div id="pp-guide-areas" class="pp-guide-areas"></div>
+    </div>
+
+    <div class="pp-card">
+      <h2>세부지표별 계산 방법</h2>
+      <div class="pp-row">
+        <input type="search" id="pp-guide-search" class="pp-input"
+               placeholder="지표·항목명 검색 (예: 피인용, 청구항, 잔존)">
+      </div>
+      <div id="pp-guide-components"></div>
+    </div>
+
+    <div class="pp-card">
+      <h2>점수를 왜 이렇게 계산하나 (공통 규칙)</h2>
+      <div id="pp-guide-rules" class="pp-rules"></div>
+    </div>
+
+    <div class="pp-grid-2">
+      <div class="pp-card">
+        <h2>등급</h2>
+        <table class="pp-table" id="pp-guide-grades">
+          <thead><tr><th>등급</th><th>총점 기준</th></tr></thead><tbody></tbody>
+        </table>
+      </div>
+      <div class="pp-card">
+        <h2>검토 루트</h2>
+        <table class="pp-table" id="pp-guide-routes">
+          <thead><tr><th>루트</th><th>조건</th></tr></thead><tbody></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="pp-card">
+      <h2>입력 항목 (윈텔립스 다운로드 권장 항목)</h2>
+      <p class="pp-help">
+        <span class="pp-badge pp-badge-err">필수</span> 없으면 분석이 진행되지 않습니다 ·
+        <span class="pp-badge pp-badge-warn">주요</span> 없으면 관련 점수가 0점 처리되고 경고가 표시됩니다 ·
+        <span class="pp-badge pp-badge-muted">선택</span> 있으면 정확도가 올라갑니다
+      </p>
+      <div id="pp-guide-fields"></div>
     </div>
   </section>
 

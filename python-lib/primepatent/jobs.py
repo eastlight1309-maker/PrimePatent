@@ -24,6 +24,11 @@ CANCELLED = "cancelled"
 
 DEFAULT_TTL_SEC = 3600 * 6
 MAX_JOBS = 50
+# 완료된 작업의 결과 payload 를 메모리에 유지할 개수.
+# 분석 결과는 행당 약 9KB 이므로 5,000행이면 1건에 45MB 가 넘는다.
+# 무제한 보관하면 백엔드가 메모리 부족으로 죽으므로 최근 N건만 남기고 비운다.
+# (저장소에 저장한 결과는 영향받지 않는다)
+RESULT_RETENTION = 3
 
 
 class Job:
@@ -36,6 +41,7 @@ class Job:
         self.message = "대기 중"
         self.progress = 0.0
         self.result: Optional[Any] = None
+        self.result_dropped = False        # 메모리 회수로 결과를 비웠는지
         self.error: Optional[str] = None
         self.traceback: Optional[str] = None
         self.created_at = time.time()
@@ -73,6 +79,7 @@ class Job:
                 "finishedAt": self.finished_at,
                 "elapsedSec": round((self.finished_at or time.time()) - self.created_at, 1),
                 "cancelRequested": self.cancelled,
+                "resultDropped": self.result_dropped,
             }
             if include_result:
                 payload["result"] = self.result
@@ -80,9 +87,11 @@ class Job:
 
 
 class JobManager:
-    def __init__(self, ttl_sec: int = DEFAULT_TTL_SEC, max_jobs: int = MAX_JOBS):
+    def __init__(self, ttl_sec: int = DEFAULT_TTL_SEC, max_jobs: int = MAX_JOBS,
+                 result_retention: int = RESULT_RETENTION):
         self.ttl_sec = ttl_sec
         self.max_jobs = max_jobs
+        self.result_retention = max(1, int(result_retention))
         self._jobs: Dict[str, Job] = {}
         self._lock = threading.RLock()
 
@@ -119,6 +128,7 @@ class JobManager:
             finally:
                 job.finished_at = time.time()
                 job.updated_at = job.finished_at
+                self._trim_results()
 
         thread = threading.Thread(target=runner, name="primepatent-%s-%s" % (kind, job.id),
                                   daemon=True)
@@ -140,6 +150,18 @@ class JobManager:
         with self._lock:
             jobs = list(self._jobs.values())
         return [j.to_dict() for j in sorted(jobs, key=lambda j: -j.created_at)]
+
+    def _trim_results(self) -> None:
+        """최근 N건을 제외한 완료 작업의 결과 payload 를 비워 메모리를 회수한다."""
+        with self._lock:
+            finished = sorted(
+                (job for job in self._jobs.values()
+                 if job.finished_at and job.result is not None),
+                key=lambda job: job.finished_at or 0, reverse=True)
+            for job in finished[self.result_retention:]:
+                job.result = None
+                job.result_dropped = True
+                logger.info("오래된 작업 결과를 메모리에서 해제했습니다: %s", job.id)
 
     def _cleanup(self) -> None:
         now = time.time()

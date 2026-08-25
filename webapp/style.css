@@ -183,5 +183,67 @@ textarea.pp-input { resize: vertical; width: 100%; }
 .pp-toast-ok { background: #1f8a55; }
 .pp-toast-err { background: var(--pp-danger); }
 
+/* ---------------------------------------------------------------- 설명 화면 */
+.pp-tab-help { margin-left: auto; color: var(--pp-primary); }
+.pp-guide-lead { font-size: 13px; line-height: 1.7; margin: 0 0 12px; }
+
+.pp-split { display: flex; height: 30px; border-radius: 4px; overflow: hidden;
+            border: 1px solid var(--pp-border); margin: 10px 0 4px; }
+.pp-split-part { display: flex; align-items: center; justify-content: center;
+                 font-size: 11px; font-weight: 600; color: #fff; white-space: nowrap; }
+.pp-split-quant { background: #1a5fb4; }
+.pp-split-llm { background: #7b52c4; }
+
+.pp-steps { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+            gap: 8px; margin-top: 14px; }
+.pp-step { border: 1px solid var(--pp-border); border-radius: 5px; padding: 9px 11px;
+           background: #fbfcfd; }
+.pp-step-title { font-weight: 600; font-size: 12px; margin-bottom: 3px; }
+.pp-step-detail { font-size: 11px; color: var(--pp-muted); line-height: 1.55; }
+
+.pp-guide-areas { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+                  gap: 10px; }
+.pp-guide-area { border: 1px solid var(--pp-border); border-radius: 6px; overflow: hidden; }
+.pp-guide-area-head { padding: 9px 12px; background: #f0f2f5; }
+.pp-guide-area-title { font-weight: 700; font-size: 13px; display: flex;
+                       justify-content: space-between; gap: 8px; }
+.pp-guide-area-summary { font-size: 11px; color: var(--pp-muted); margin-top: 2px; }
+.pp-guide-comp-row { display: grid; grid-template-columns: 1fr 74px 46px; gap: 6px;
+                     align-items: center; padding: 6px 12px; font-size: 12px;
+                     border-top: 1px solid var(--pp-border); }
+.pp-guide-comp-row:hover { background: #eef4fc; cursor: pointer; }
+.pp-src { font-size: 10px; padding: 1px 5px; border-radius: 8px; white-space: nowrap;
+          text-align: center; }
+.pp-src-quant { background: #e3edfa; color: #164e94; }
+.pp-src-llm { background: #efe7fa; color: #5b3a99; }
+.pp-src-mixed { background: #e9f3ec; color: #1f6b45; }
+
+.pp-guide-card { border: 1px solid var(--pp-border); border-radius: 6px; padding: 12px 14px;
+                 margin-bottom: 10px; }
+.pp-guide-card-head { display: flex; justify-content: space-between; align-items: baseline;
+                      gap: 10px; flex-wrap: wrap; }
+.pp-guide-card-title { font-weight: 700; font-size: 13px; }
+.pp-guide-max { font-size: 12px; color: var(--pp-muted); font-variant-numeric: tabular-nums; }
+.pp-guide-how { font-size: 12px; line-height: 1.65; margin: 7px 0; }
+.pp-formula { background: #f6f8fa; border: 1px solid var(--pp-border); border-radius: 4px;
+              padding: 7px 10px; font-size: 11px; white-space: pre-wrap; margin: 6px 0;
+              font-family: Consolas, Menlo, monospace; }
+.pp-mini-table { border-collapse: collapse; font-size: 11px; margin: 6px 0; min-width: 260px; }
+.pp-mini-table td { border-bottom: 1px solid var(--pp-border); padding: 3px 8px; }
+.pp-mini-table td:last-child { text-align: right; font-weight: 600; white-space: nowrap; }
+.pp-field-tags { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
+.pp-field-tag { background: #eef1f5; border-radius: 3px; padding: 1px 7px; font-size: 10px;
+                color: #46505d; }
+
+.pp-rules { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 10px; }
+.pp-rule { border-left: 3px solid var(--pp-primary); background: #fbfcfd; padding: 9px 12px;
+           border-radius: 0 5px 5px 0; }
+.pp-rule-title { font-weight: 700; font-size: 12px; margin-bottom: 4px; }
+.pp-rule-line { font-size: 11px; line-height: 1.6; margin: 3px 0; }
+.pp-rule-line b { color: var(--pp-muted); font-weight: 600; }
+
+.pp-field-group { margin-bottom: 10px; }
+.pp-field-group summary { cursor: pointer; font-weight: 600; font-size: 12px; padding: 5px 0; }
+
 .pp-preview-wrap { margin-top: 14px; }
 .pp-empty { padding: 20px; text-align: center; color: var(--pp-muted); font-size: 12px; }

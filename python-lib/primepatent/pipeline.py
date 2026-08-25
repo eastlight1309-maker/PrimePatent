@@ -11,7 +11,7 @@ from typing import Any, Callable, Dict, List, Optional, Sequence
 from .config import ScoringConfig
 from .family import build_families, representative_records
 from .ingest import load_table
-from .llm.analyzer import LLMAnalyzer, analysis_defaults
+from .llm.analyzer import LLMAnalyzer, LLMCache, analysis_defaults
 from .llm.client import LLMError, get_client
 from .mapping import mapping_report, resolve_mapping
 from .parsing import to_date, to_text
@@ -63,7 +63,7 @@ def run_analysis(headers: Sequence[str], rows: Sequence[Dict[str, Any]],
                  source_meta: Optional[Dict[str, Any]] = None,
                  progress: Optional[ProgressFn] = None,
                  cancel_event: Optional[threading.Event] = None,
-                 llm_cache: Optional[Dict[str, Dict]] = None) -> Dict[str, Any]:
+                 llm_cache: Optional[LLMCache] = None) -> Dict[str, Any]:
     """전체 분석 실행. 결과 payload(dict)를 반환한다."""
     progress = progress or _noop_progress
     config = config or ScoringConfig()

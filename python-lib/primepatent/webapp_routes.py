@@ -22,7 +22,9 @@ from .columns import field_catalog
 from .config import (ALLOWED_LLM_CANDIDATES, ALLOWED_LLM_IDS, AREA_MAX,
                      COMPONENT_MAX, DEFAULT_LLM_ID, ScoringConfig)
 from .export import export_bytes, export_filename
+from .guide import build_guide
 from .jobs import DONE, JobManager
+from .llm.analyzer import LLMCache
 from .llm.client import probe_client
 from .mapping import resolve_mapping
 from .pipeline import PipelineCancelled, run_analysis
@@ -53,7 +55,7 @@ class AppState:
     def __init__(self, folder_id: Optional[str] = None, local_root: Optional[str] = None):
         self.jobs = JobManager()
         self.uploads = UploadStore()
-        self.llm_cache: Dict[str, Dict] = {}
+        self.llm_cache = LLMCache()
         self.folder_id = folder_id
         self.local_root = local_root
         self.store: Optional[ResultStore] = None
@@ -283,6 +285,11 @@ def register_routes(app, state: Optional[AppState] = None) -> AppState:
     def api_fields():
         return jsonify({"ok": True, "fields": field_catalog()})
 
+    @app.route("/api/guide", methods=["GET"])
+    def api_guide():
+        """설명 화면 데이터. 배점·가중치는 실제 스코어링 상수에서 생성된다."""
+        return jsonify({"ok": True, "guide": build_guide()})
+
     @app.route("/api/llm/probe", methods=["GET"])
     def api_llm_probe():
         llm_id = request.args.get("llmId") or DEFAULT_LLM_ID
@@ -388,6 +395,11 @@ def register_routes(app, state: Optional[AppState] = None) -> AppState:
         job = state.jobs.get(job_id)
         if job is None:
             raise LookupError("작업을 찾을 수 없습니다(만료되었을 수 있습니다).")
+        if job.status == DONE and job.result_dropped:
+            raise LookupError(
+                "이 분석 결과는 메모리에서 해제되었습니다(최근 %d건만 유지). "
+                "저장소에 저장해 둔 결과를 불러오거나 분석을 다시 실행하십시오."
+                % state.jobs.result_retention)
         if job.status != DONE or not isinstance(job.result, dict):
             raise LookupError("아직 완료되지 않은 작업입니다(상태: %s)." % job.status)
         return job.result

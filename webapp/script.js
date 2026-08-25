@@ -42,6 +42,21 @@
   };
   function esc(value) { return value === null || value === undefined ? "" : String(value); }
   function clone(value) { return JSON.parse(JSON.stringify(value)); }
+
+  /* "**강조**" 표기를 <b> 로 렌더링한다(innerHTML 을 쓰지 않아 주입 위험 없음). */
+  function richText(node, text) {
+    String(text === null || text === undefined ? "" : text)
+      .split(/(\*\*[^*]+\*\*)/g)
+      .forEach(function (chunk) {
+        if (!chunk) return;
+        if (chunk.length > 4 && chunk.slice(0, 2) === "**" && chunk.slice(-2) === "**") {
+          node.appendChild(el("b", null, chunk.slice(2, -2)));
+        } else {
+          node.appendChild(document.createTextNode(chunk));
+        }
+      });
+    return node;
+  }
   function num(value, digits) {
     if (value === null || value === undefined || value === "") return "-";
     var parsed = Number(value);
@@ -91,6 +106,7 @@
     sort: "rank",
     order: "asc",
     total: 0,
+    guide: null,            // 설명 화면 데이터(최초 1회 로드)
     source: null            // {type:'job'|'run', id:...}
   };
 
@@ -158,12 +174,227 @@
     request("/api/fields").then(function (data) { state.fields = data.fields; })
       .catch(function () { /* 매핑 화면에서 재시도 */ });
 
+    bindGuide();
     bindUpload();
     bindMapping();
     bindConfig();
     bindResult();
     bindLibrary();
     loadRuns();
+  }
+
+  // ------------------------------------------------------------ 설명 화면
+  function bindGuide() {
+    $("pp-guide-search").addEventListener("input", debounce(function () {
+      renderGuideComponents();
+    }, 250));
+    // 설명 탭을 처음 열 때 한 번만 불러온다.
+    document.querySelector('.pp-tab[data-tab="guide"]').addEventListener("click", loadGuide);
+  }
+
+  function loadGuide() {
+    if (state.guide) return;
+    request("/api/guide").then(function (data) {
+      state.guide = data.guide;
+      renderGuide();
+    }).catch(function (error) { toast("설명을 불러오지 못했습니다: " + error.message, "err"); });
+  }
+
+  function renderGuide() {
+    var guide = state.guide;
+
+    // 정량 / LLM 비중 막대
+    var split = $("pp-guide-split");
+    split.innerHTML = "";
+    [["quant", "정량 지표 " + guide.quantMax + "점", guide.quantMax],
+     ["llm", "LLM 분석 " + guide.llmMax + "점", guide.llmMax]].forEach(function (part) {
+      var box = el("div", "pp-split-part pp-split-" + part[0], part[1]);
+      box.style.width = (part[2] / guide.totalMax * 100) + "%";
+      split.appendChild(box);
+    });
+
+    var steps = $("pp-guide-steps");
+    steps.innerHTML = "";
+    guide.steps.forEach(function (item) {
+      var box = el("div", "pp-step");
+      box.appendChild(el("div", "pp-step-title", item.step));
+      box.appendChild(el("div", "pp-step-detail", item.detail));
+      steps.appendChild(box);
+    });
+
+    // 영역 요약 카드
+    var areas = $("pp-guide-areas");
+    areas.innerHTML = "";
+    guide.areas.forEach(function (area) {
+      var box = el("div", "pp-guide-area");
+      var head = el("div", "pp-guide-area-head");
+      var title = el("div", "pp-guide-area-title");
+      title.appendChild(el("span", null, area.label));
+      title.appendChild(el("span", null, area.max + "점"));
+      head.appendChild(title);
+      head.appendChild(el("div", "pp-guide-area-summary", area.summary));
+      box.appendChild(head);
+      area.components.forEach(function (component) {
+        var row = el("div", "pp-guide-comp-row");
+        row.appendChild(el("span", null, component.label));
+        row.appendChild(el("span", "pp-src pp-src-" + component.source, component.sourceLabel));
+        row.appendChild(el("span", "pp-num", component.max + "점"));
+        row.addEventListener("click", function () {
+          $("pp-guide-search").value = component.label;
+          renderGuideComponents();
+          var target = document.getElementById("guide-" + component.key.replace(".", "-"));
+          if (target) target.scrollIntoView({ behavior: "smooth", block: "center" });
+        });
+        box.appendChild(row);
+      });
+      areas.appendChild(box);
+    });
+
+    renderGuideComponents();
+
+    var rules = $("pp-guide-rules");
+    rules.innerHTML = "";
+    guide.rules.forEach(function (rule) {
+      var box = el("div", "pp-rule");
+      box.appendChild(el("div", "pp-rule-title", rule.title));
+      [["왜", rule.why], ["어떻게", rule.how], ["참고", rule.note]].forEach(function (pair) {
+        if (!pair[1]) return;
+        var line = el("div", "pp-rule-line");
+        line.appendChild(el("b", null, pair[0] + " · "));
+        richText(line, pair[1]);
+        box.appendChild(line);
+      });
+      rules.appendChild(box);
+    });
+
+    var grades = document.querySelector("#pp-guide-grades tbody");
+    grades.innerHTML = "";
+    guide.grades.forEach(function (item, index) {
+      var tr = el("tr");
+      var cell = el("td");
+      cell.appendChild(el("span", "pp-grade pp-grade-" + item.grade, item.grade));
+      tr.appendChild(cell);
+      var previous = index > 0 ? guide.grades[index - 1].min : null;
+      tr.appendChild(el("td", null, previous === null
+        ? item.min + "점 이상"
+        : (item.min > 0 ? item.min + "점 이상 " + previous + "점 미만" : previous + "점 미만")));
+      grades.appendChild(tr);
+    });
+
+    var routes = document.querySelector("#pp-guide-routes tbody");
+    routes.innerHTML = "";
+    guide.routes.forEach(function (item) {
+      var tr = el("tr");
+      tr.appendChild(el("td", null, item.route));
+      tr.appendChild(el("td", null, item.condition));
+      routes.appendChild(tr);
+    });
+
+    var fields = $("pp-guide-fields");
+    fields.innerHTML = "";
+    guide.fieldGroups.forEach(function (group) {
+      var details = el("details", "pp-field-group");
+      var summary = el("summary", null, group.group + " (" + group.fields.length + ")");
+      details.appendChild(summary);
+      var table = el("table", "pp-table pp-table-compact");
+      var body = el("tbody");
+      group.fields.forEach(function (field) {
+        var tr = el("tr");
+        var kindCell = el("td");
+        var kind = field.required ? ["필수", "pp-badge-err"]
+          : (field.important ? ["주요", "pp-badge-warn"] : ["선택", "pp-badge-muted"]);
+        kindCell.appendChild(el("span", "pp-badge " + kind[1], kind[0]));
+        tr.appendChild(kindCell);
+        tr.appendChild(el("td", null, field.label));
+        tr.appendChild(el("td", "pp-help", field.note || ""));
+        body.appendChild(tr);
+      });
+      table.appendChild(body);
+      details.appendChild(table);
+      fields.appendChild(details);
+    });
+  }
+
+  function renderGuideComponents() {
+    if (!state.guide) return;
+    var keyword = ($("pp-guide-search").value || "").trim().toLowerCase();
+    var container = $("pp-guide-components");
+    container.innerHTML = "";
+    var shown = 0;
+
+    state.guide.areas.forEach(function (area) {
+      area.components.forEach(function (component) {
+        if (keyword) {
+          var blob = (component.label + " " + component.how + " " + component.formula + " " +
+                      area.label + " " + (component.fields || []).join(" ")).toLowerCase();
+          if (blob.indexOf(keyword) < 0) return;
+        }
+        shown += 1;
+        var card = el("div", "pp-guide-card");
+        card.id = "guide-" + component.key.replace(".", "-");
+
+        var head = el("div", "pp-guide-card-head");
+        var title = el("span", "pp-guide-card-title", area.label + " › " + component.label);
+        head.appendChild(title);
+        var right = el("span", "pp-guide-max");
+        right.textContent = "배점 " + component.max + "점";
+        if (component.source === "mixed") {
+          right.textContent += " (정량 " + component.quantMax + " + LLM " + component.llmMax + ")";
+        }
+        head.appendChild(right);
+        card.appendChild(head);
+
+        var badge = el("span", "pp-src pp-src-" + component.source, component.sourceLabel);
+        card.appendChild(badge);
+        card.appendChild(richText(el("div", "pp-guide-how"), component.how));
+        if (component.formula) {
+          card.appendChild(el("div", "pp-formula", component.formula));
+        }
+        if (component.table && component.table.length) {
+          var table = el("table", "pp-mini-table");
+          var body = el("tbody");
+          component.table.forEach(function (row) {
+            var tr = el("tr");
+            tr.appendChild(el("td", null, row.label));
+            tr.appendChild(el("td", null, row.score));
+            body.appendChild(tr);
+          });
+          table.appendChild(body);
+          card.appendChild(table);
+        }
+        if (component.weights) {
+          var weightTable = el("table", "pp-mini-table");
+          var weightBody = el("tbody");
+          component.weights.forEach(function (item) {
+            var tr = el("tr");
+            tr.appendChild(el("td", null, item.country));
+            tr.appendChild(el("td", null, item.weight));
+            weightBody.appendChild(tr);
+          });
+          if (component.weightsOther !== null && component.weightsOther !== undefined) {
+            var other = el("tr");
+            other.appendChild(el("td", null, "기타 국가"));
+            other.appendChild(el("td", null, component.weightsOther));
+            weightBody.appendChild(other);
+          }
+          weightTable.appendChild(weightBody);
+          card.appendChild(weightTable);
+        }
+        if (component.fields && component.fields.length) {
+          var tags = el("div", "pp-field-tags");
+          tags.appendChild(el("span", "pp-field-tag", "사용 데이터:"));
+          component.fields.forEach(function (field) {
+            tags.appendChild(el("span", "pp-field-tag", field));
+          });
+          card.appendChild(tags);
+        }
+        container.appendChild(card);
+      });
+    });
+
+    if (!shown) {
+      container.appendChild(el("div", "pp-empty", "검색 결과가 없습니다."));
+    }
   }
 
   // ------------------------------------------------------------ 업로드
@@ -660,7 +891,15 @@
   function loadResult(resetView) {
     var base = resultBase();
     if (!base) return;
-    if (resetView) { state.page = 0; state.sort = "rank"; state.order = "asc"; }
+    if (resetView) {
+      // 새 결과를 여는 것이므로 이전 분석에서 쓰던 필터가 남아 있으면 안 된다.
+      // (남아 있으면 새 결과가 0건으로 보여 분석이 실패한 것처럼 오인된다)
+      state.page = 0; state.sort = "rank"; state.order = "asc";
+      $("pp-q").value = "";
+      $("pp-filter-grade").value = "";
+      $("pp-filter-gate").value = "";
+      $("pp-filter-route").value = "";
+    }
     var params = [
       "offset=" + state.page * state.pageSize,
       "limit=" + state.pageSize,
@@ -676,7 +915,10 @@
       state.result = data;
       state.total = data.total;
       enableTab("result", true);
-      setTab("result");
+      // 탭 이동은 '새 결과를 여는 경우' 에만 한다.
+      // 필터·정렬·페이지 이동까지 탭을 바꾸면, 검색어 입력의 디바운스 요청이 뒤늦게
+      // 도착하면서 다른 탭을 보고 있던 사용자를 결과 탭으로 끌고 온다.
+      if (resetView) setTab("result");
       renderSummary(data);
       renderRows(data.rows);
       renderPager();

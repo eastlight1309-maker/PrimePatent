@@ -107,14 +107,18 @@ def _expiring_or_alive(record: Dict[str, Any], as_of: date) -> str:
 
 
 def remaining_term_years(record: Dict[str, Any], as_of: Optional[date] = None) -> Optional[float]:
-    """잔존기간(년) 추정. 만료일이 있으면 사용하고, 없으면 최초우선일 + 20년."""
+    """잔존기간(년) 추정. 만료일이 있으면 사용하고, 없으면 최초우선일 + 20년.
+
+    존속기간은 제도상 20년(+연장)을 넘을 수 없으므로 상한을 둔다.
+    이 상한이 없으면 우선일이 미래로 잘못 기재된 행(오타 등)이 잔존기간 만점을 받는다.
+    """
+    from .config import PATENT_TERM_YEARS
     as_of = as_of or date.today()
     expiry = to_date(record.get("expiryDate"))
     if expiry:
-        return max(0.0, (expiry - as_of).days / 365.25)
+        return max(0.0, min(PATENT_TERM_YEARS, (expiry - as_of).days / 365.25))
     start = record.get("earliestPriorityDate") or record.get("applicationDate")
     elapsed = years_between(start, as_of)
     if elapsed is None:
         return None
-    from .config import PATENT_TERM_YEARS
-    return max(0.0, PATENT_TERM_YEARS - elapsed)
+    return max(0.0, min(PATENT_TERM_YEARS, PATENT_TERM_YEARS - elapsed))

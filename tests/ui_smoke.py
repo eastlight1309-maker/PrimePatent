@@ -106,6 +106,16 @@ def main():
         print("10) 저장본 불러오기:", page.text_content("#pp-result-title"))
         page.screenshot(path=os.path.join(SHOTS, "08_reloaded.png"), full_page=False)
 
+        # 설명 화면
+        page.click('.pp-tab[data-tab="guide"]')
+        page.wait_for_selector("#pp-guide-components .pp-guide-card", timeout=20000)
+        page.wait_for_timeout(600)
+        print("11) 설명 화면 · 영역", page.locator("#pp-guide-areas .pp-guide-area").count(),
+              "· 지표", page.locator("#pp-guide-components .pp-guide-card").count(),
+              "· 규칙", page.locator("#pp-guide-rules .pp-rule").count(),
+              "·", " / ".join(page.locator("#pp-guide-split .pp-split-part").all_text_contents()))
+        page.screenshot(path=os.path.join(SHOTS, "09_guide.png"), full_page=False)
+
         browser.close()
 
     real_errors = [e for e in errors if "favicon" not in e.lower()]

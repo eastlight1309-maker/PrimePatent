@@ -7,6 +7,7 @@
 |---|---|---|
 | GET | `/api/health` | 구동 진단(저장소 상태·환경·degraded), 허용 LLM 목록, 기본 설정, 배점표 |
 | GET | `/api/fields` | 표준 필드 카탈로그(라벨/별칭/필수 여부) |
+| GET | `/api/guide` | 설명 화면 데이터(영역·세부지표 배점, 계산식, 공통 규칙, 등급·루트, 입력 항목) |
 | GET | `/api/llm/probe?llmId=` | LLM 연결 점검 |
 | POST | `/api/upload` | 파일 업로드(multipart `file`) → 헤더·미리보기·자동매핑 |
 | POST | `/api/upload/<id>/sheet` | 시트 변경 후 재적재 |
