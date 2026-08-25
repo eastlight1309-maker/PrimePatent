@@ -1,0 +1,227 @@
+# -*- coding: utf-8 -*-
+"""WIPS 셀 값 파서 (날짜/숫자/리스트/불리언/국가코드/법적상태)."""
+
+from __future__ import annotations
+
+import math
+import re
+import unicodedata
+from datetime import date, datetime
+from typing import Any, List, Optional
+
+_LIST_SPLIT_RE = re.compile(r"[;|\n\r]+|(?<!\d),(?!\d)|,\s+|\t+")
+_DATE_CLEAN_RE = re.compile(r"[^0-9]")
+_COUNTRY_PREFIX_RE = re.compile(r"^([A-Z]{2})")
+_NUMBER_RE = re.compile(r"-?\d+(?:[.,]\d+)?")
+
+# 문서번호 앞 2자리 국가코드로 인정할 값 (WO/EP 포함)
+_KNOWN_COUNTRIES = {
+    "KR", "US", "JP", "CN", "EP", "WO", "TW", "DE", "GB", "FR", "IN", "CA",
+    "AU", "RU", "BR", "MX", "SG", "MY", "TH", "VN", "ID", "PH", "IL", "NL",
+    "IT", "ES", "SE", "CH", "AT", "BE", "DK", "FI", "NO", "PL", "TR", "ZA",
+    "HK", "MO", "NZ", "PT", "IE", "CZ", "HU", "RO", "GR", "AR", "CL", "SA",
+    "AE", "EA", "AP", "OA", "UA", "BY", "KZ",
+}
+
+TRUE_TOKENS = {"y", "yes", "true", "1", "t", "o", "유", "있음", "있다", "존재",
+               "예", "yes.", "有", "적용", "청구", "설정", "완료"}
+FALSE_TOKENS = {"n", "no", "false", "0", "f", "x", "무", "없음", "없다", "미청구",
+               "아니오", "無", "미적용", "미설정", "-", "미해당"}
+
+
+def is_blank(value: Any) -> bool:
+    if value is None:
+        return True
+    if isinstance(value, float) and math.isnan(value):
+        return True
+    text = str(value).strip()
+    return text == "" or text.lower() in ("nan", "none", "null", "-", "n/a", "na")
+
+
+def to_text(value: Any, limit: Optional[int] = None) -> str:
+    if is_blank(value):
+        return ""
+    text = unicodedata.normalize("NFKC", str(value)).strip()
+    text = text.replace("\r\n", "\n")
+    if limit and len(text) > limit:
+        text = text[:limit]
+    return text
+
+
+def to_list(value: Any) -> List[str]:
+    """구분자(;, |, 개행, 콤마)로 분리된 다중값 셀을 리스트로."""
+    if is_blank(value):
+        return []
+    if isinstance(value, (list, tuple, set)):
+        items = [to_text(v) for v in value]
+    else:
+        text = to_text(value)
+        items = _LIST_SPLIT_RE.split(text)
+    out: List[str] = []
+    seen = set()
+    for item in items:
+        item = (item or "").strip().strip("'\"")
+        if not item or item in ("-",):
+            continue
+        if item not in seen:
+            seen.add(item)
+            out.append(item)
+    return out
+
+
+def to_int(value: Any, default: Optional[int] = None) -> Optional[int]:
+    number = to_float(value, None)
+    if number is None:
+        return default
+    try:
+        return int(round(number))
+    except (ValueError, OverflowError):
+        return default
+
+
+def to_float(value: Any, default: Optional[float] = None) -> Optional[float]:
+    if is_blank(value):
+        return default
+    if isinstance(value, bool):
+        return 1.0 if value else 0.0
+    if isinstance(value, (int, float)):
+        return float(value)
+    match = _NUMBER_RE.search(str(value).replace(",", ""))
+    if not match:
+        return default
+    try:
+        return float(match.group(0).replace(",", "."))
+    except ValueError:
+        return default
+
+
+def to_date(value: Any) -> Optional[date]:
+    """WIPS 날짜(YYYY-MM-DD, YYYY.MM.DD, YYYYMMDD, datetime, 엑셀 serial) 파싱."""
+    if is_blank(value):
+        return None
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, date):
+        return value
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        # 엑셀 serial date (1900 시스템). 20000101 형태의 숫자와 구분.
+        number = float(value)
+        if 10000 <= number <= 100000:
+            try:
+                from datetime import timedelta
+                return (datetime(1899, 12, 30) + timedelta(days=int(number))).date()
+            except (ValueError, OverflowError):
+                return None
+    digits = _DATE_CLEAN_RE.sub("", str(value))
+    if len(digits) >= 8:
+        digits = digits[:8]
+        try:
+            return date(int(digits[0:4]), int(digits[4:6]), int(digits[6:8]))
+        except ValueError:
+            try:  # 일자가 00 인 경우가 있음
+                return date(int(digits[0:4]), max(1, int(digits[4:6])), 1)
+            except ValueError:
+                return None
+    if len(digits) == 6:
+        try:
+            return date(int(digits[0:4]), int(digits[4:6]), 1)
+        except ValueError:
+            return None
+    if len(digits) == 4:
+        try:
+            return date(int(digits), 1, 1)
+        except ValueError:
+            return None
+    return None
+
+
+_NEGATIVE_RE = re.compile(r"^(무|없음|없다|해당없음|미청구|미설정|미적용|미해당|none|없)$")
+_POSITIVE_RE = re.compile(r"(있음|있다|유$|^유|yes|설정됨|존재)")
+
+
+def to_bool(value: Any) -> Optional[bool]:
+    """Y/N, 유/무 등을 불리언으로. 판단 불가하면 None(=데이터 없음).
+
+    주의: "무효심판(2)" 처럼 부정어(무)를 부분문자열로 포함하지만 실제로는
+    이벤트가 존재하는 값이 있으므로, 완전일치 → 정규식 → 숫자 → 내용유무 순으로 본다.
+    """
+    if is_blank(value):
+        return None
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    text = to_text(value).strip().lower()
+    if not text:
+        return None
+    if text in TRUE_TOKENS:
+        return True
+    if text in FALSE_TOKENS:
+        return False
+    if _NEGATIVE_RE.match(text):
+        return False
+    if _POSITIVE_RE.search(text):
+        return True
+    number = to_float(text, None)
+    if number is not None and not re.search(r"[a-z가-힣]", text.replace("건", "")):
+        return number > 0
+    if number is not None:
+        # "무효심판(2)", "거절결정불복심판 1회" 등 - 건수가 있으면 존재로 본다
+        return number > 0
+    # 그 밖의 텍스트(예: 분할, 계속출원)는 값이 존재하므로 True
+    return True
+
+
+def country_of(doc_number: Any) -> Optional[str]:
+    """문헌번호/출원번호 앞 2자리에서 국가코드 추출."""
+    text = to_text(doc_number).upper().replace(" ", "")
+    if not text:
+        return None
+    match = _COUNTRY_PREFIX_RE.match(text)
+    if match and match.group(1) in _KNOWN_COUNTRIES:
+        return match.group(1)
+    return None
+
+
+def countries_of(values: Any) -> List[str]:
+    out: List[str] = []
+    for item in (values if isinstance(values, (list, tuple)) else to_list(values)):
+        code = country_of(item)
+        if code and code not in out:
+            out.append(code)
+    return out
+
+
+def normalize_country(value: Any) -> Optional[str]:
+    text = to_text(value).upper().strip()
+    if not text:
+        return None
+    text = re.sub(r"[^A-Z]", "", text)[:2]
+    return text if len(text) == 2 else None
+
+
+def year_of(value: Optional[date]) -> Optional[int]:
+    return value.year if isinstance(value, date) else None
+
+
+def years_between(start: Optional[date], end: Optional[date]) -> Optional[float]:
+    if not isinstance(start, date) or not isinstance(end, date):
+        return None
+    return (end - start).days / 365.25
+
+
+def safe_log1p(value: Optional[float]) -> float:
+    try:
+        return math.log1p(max(0.0, float(value or 0.0)))
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def clamp(value: float, low: float = 0.0, high: float = 1.0) -> float:
+    try:
+        value = float(value)
+    except (TypeError, ValueError):
+        return low
+    if math.isnan(value):
+        return low
+    return max(low, min(high, value))

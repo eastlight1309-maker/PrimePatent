@@ -1,0 +1,284 @@
+<div id="pp-app" class="pp-app">
+  <header class="pp-header">
+    <div class="pp-title">
+      <h1>PrimePatent</h1>
+      <span class="pp-subtitle">윈텔립스 RAW DATA 기반 핵심특허 스코어링 (권리 30 · 기술 30 · 시장 20 · 영향력 20)</span>
+    </div>
+    <div class="pp-header-meta">
+      <span id="pp-storage-badge" class="pp-badge pp-badge-muted">저장소 확인 중</span>
+      <span id="pp-llm-badge" class="pp-badge pp-badge-muted">LLM 미확인</span>
+    </div>
+  </header>
+
+  <nav class="pp-tabs" role="tablist">
+    <button class="pp-tab pp-tab-active" data-tab="upload" type="button">1. 업로드</button>
+    <button class="pp-tab" data-tab="mapping" type="button" disabled>2. 컬럼 매핑</button>
+    <button class="pp-tab" data-tab="config" type="button" disabled>3. 분석 설정</button>
+    <button class="pp-tab" data-tab="result" type="button" disabled>4. 결과</button>
+    <button class="pp-tab" data-tab="library" type="button">5. 저장소</button>
+  </nav>
+
+  <div id="pp-toast" class="pp-toast" hidden></div>
+
+  <!-- ------------------------------------------------ 1. 업로드 -->
+  <section class="pp-panel pp-panel-active" data-panel="upload">
+    <div class="pp-card">
+      <h2>윈텔립스 다운로드 파일 업로드</h2>
+      <p class="pp-help">
+        WIPS ON 에서 내려받은 엑셀(.xlsx/.xls) 또는 CSV 파일을 올리십시오.
+        상단에 검색식 안내 행이 있어도 헤더 행을 자동으로 찾습니다.
+      </p>
+      <div id="pp-dropzone" class="pp-dropzone">
+        <input type="file" id="pp-file" accept=".xlsx,.xlsm,.xls,.csv,.tsv" hidden>
+        <button type="button" id="pp-file-btn" class="pp-btn pp-btn-primary">파일 선택</button>
+        <span class="pp-help">또는 이 영역으로 파일을 끌어다 놓으십시오.</span>
+        <div id="pp-file-name" class="pp-file-name"></div>
+      </div>
+      <div id="pp-upload-progress" class="pp-progress" hidden><div class="pp-progress-bar"></div></div>
+      <div id="pp-upload-summary" class="pp-summary-grid" hidden></div>
+      <div class="pp-row" id="pp-sheet-row" hidden>
+        <label for="pp-sheet">시트 선택</label>
+        <select id="pp-sheet" class="pp-input"></select>
+      </div>
+      <div id="pp-preview-wrap" class="pp-preview-wrap" hidden>
+        <h3>미리보기 (상위 15행)</h3>
+        <div class="pp-table-scroll"><table id="pp-preview" class="pp-table pp-table-compact"></table></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ------------------------------------------------ 2. 매핑 -->
+  <section class="pp-panel" data-panel="mapping">
+    <div class="pp-card">
+      <div class="pp-card-head">
+        <h2>컬럼 매핑</h2>
+        <div class="pp-actions">
+          <button type="button" id="pp-map-reset" class="pp-btn">자동 매핑으로 되돌리기</button>
+          <button type="button" id="pp-map-next" class="pp-btn pp-btn-primary">분석 설정으로 →</button>
+        </div>
+      </div>
+      <div id="pp-map-status" class="pp-status"></div>
+      <div class="pp-row">
+        <input type="search" id="pp-map-search" class="pp-input" placeholder="필드명 검색(예: 청구항, 피인용)">
+        <label class="pp-check"><input type="checkbox" id="pp-map-only-unmapped"> 미매핑만 보기</label>
+        <label class="pp-check"><input type="checkbox" id="pp-map-only-important" checked> 주요 항목 우선</label>
+      </div>
+      <div class="pp-table-scroll pp-table-tall">
+        <table class="pp-table" id="pp-map-table">
+          <thead><tr><th>구분</th><th>표준 필드</th><th>엑셀 컬럼</th><th>매핑</th><th>비고</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+      <details class="pp-details">
+        <summary>매핑되지 않은 엑셀 컬럼 <span id="pp-unmapped-count"></span></summary>
+        <div id="pp-unmapped-list" class="pp-chip-list"></div>
+      </details>
+    </div>
+  </section>
+
+  <!-- ------------------------------------------------ 3. 설정 -->
+  <section class="pp-panel" data-panel="config">
+    <div class="pp-grid-2">
+      <div class="pp-card">
+        <h2>분석 주제 (Primary Topic)</h2>
+        <label class="pp-field"><span>주제명</span>
+          <input type="text" id="cfg-topic-name" class="pp-input" placeholder="예: 첨단 반도체 패키징"></label>
+        <label class="pp-field"><span>주제 설명</span>
+          <textarea id="cfg-topic-desc" class="pp-input" rows="3"
+            placeholder="예: HBM 하이브리드 본딩, TSV, 팬아웃 등 첨단 패키징 구조와 공정"></textarea></label>
+        <label class="pp-field"><span>핵심 키워드 (쉼표 구분)</span>
+          <input type="text" id="cfg-topic-keywords" class="pp-input"
+            placeholder="하이브리드 본딩, 미세 피치, TSV, 팬아웃, 휨"></label>
+        <label class="pp-field"><span>기준일 (비우면 오늘)</span>
+          <input type="date" id="cfg-as-of" class="pp-input"></label>
+      </div>
+
+      <div class="pp-card">
+        <h2>LLM 분석</h2>
+        <label class="pp-check pp-check-lg">
+          <input type="checkbox" id="cfg-llm-enabled" checked> LLM 분석 사용 (30점 구간)</label>
+        <label class="pp-field"><span>사용 모델</span>
+          <select id="cfg-llm-id" class="pp-input"></select></label>
+        <div class="pp-row">
+          <button type="button" id="pp-llm-test" class="pp-btn">연결 테스트</button>
+          <span id="pp-llm-test-result" class="pp-help"></span>
+        </div>
+        <div class="pp-grid-3">
+          <label class="pp-field"><span>동시 호출 수</span>
+            <input type="number" id="cfg-llm-workers" class="pp-input" min="1" max="16" value="4"></label>
+          <label class="pp-field"><span>재시도</span>
+            <input type="number" id="cfg-llm-retries" class="pp-input" min="0" max="5" value="2"></label>
+          <label class="pp-field"><span>본문 길이 상한</span>
+            <input type="number" id="cfg-llm-chars" class="pp-input" min="500" max="40000" step="500" value="6000"></label>
+        </div>
+        <label class="pp-field"><span>LLM 분석 문헌 수 상한 (0 = 전체)</span>
+          <input type="number" id="cfg-llm-max-docs" class="pp-input" min="0" value="0"></label>
+        <p class="pp-help">상한을 지정하면 정량 사전점수 상위 문헌만 LLM 으로 분석해 비용을 제한합니다.</p>
+      </div>
+
+      <div class="pp-card">
+        <h2>스코어링 규칙</h2>
+        <div class="pp-grid-2">
+          <label class="pp-field"><span>Gate 1 · Topic 적합도 하한(%)</span>
+            <input type="number" id="cfg-gate" class="pp-input" min="0" max="100" value="70"></label>
+          <label class="pp-field"><span>적합도 환산</span>
+            <select id="cfg-fit-mode" class="pp-input">
+              <option value="softened">완화식 (적합도-60)/40×8</option>
+              <option value="linear">선형 적합도/100×8</option>
+            </select></label>
+          <label class="pp-field"><span>비교집단 최소 표본</span>
+            <input type="number" id="cfg-peer-min" class="pp-input" min="2" max="1000" value="20"></label>
+          <label class="pp-field"><span>비교연도 ±N년</span>
+            <input type="number" id="cfg-peer-window" class="pp-input" min="0" max="10" value="1"></label>
+          <label class="pp-field"><span>패밀리 ID 기준</span>
+            <select id="cfg-family-source" class="pp-input">
+              <option value="wips">WIPS 패밀리</option>
+              <option value="epo">EPO(INPADOC) 패밀리</option>
+            </select></label>
+          <label class="pp-field"><span>대표문헌 국가 우선순위</span>
+            <input type="text" id="cfg-country-priority" class="pp-input" value="US, EP, JP, KR, CN, TW, WO"></label>
+        </div>
+        <label class="pp-check"><input type="checkbox" id="cfg-dedupe" checked>
+          패밀리 대표문헌 1건만 채점 (중복 평가 방지)</label>
+        <label class="pp-check"><input type="checkbox" id="cfg-rescale">
+          상업화 신호 결측 시 확보 항목만으로 4점 환산</label>
+      </div>
+
+      <div class="pp-card">
+        <h2>가중치</h2>
+        <h3>영역 가중치 (1.0 = 스펙 기본배점)</h3>
+        <div class="pp-grid-4" id="cfg-area-weights"></div>
+        <h3>글로벌 권리범위 국가 가중치 (상한 7)</h3>
+        <div class="pp-grid-4" id="cfg-global-weights"></div>
+        <h3>주요 시장 진입도 국가 가중치 (상한 8)</h3>
+        <div class="pp-grid-4" id="cfg-market-weights"></div>
+      </div>
+    </div>
+
+    <div class="pp-card pp-run-card">
+      <div class="pp-actions">
+        <button type="button" id="pp-run" class="pp-btn pp-btn-primary pp-btn-lg">분석 실행</button>
+        <button type="button" id="pp-cancel" class="pp-btn pp-btn-danger" hidden>취소</button>
+      </div>
+      <div id="pp-run-progress" class="pp-progress" hidden><div class="pp-progress-bar"></div></div>
+      <div id="pp-run-message" class="pp-help"></div>
+    </div>
+  </section>
+
+  <!-- ------------------------------------------------ 4. 결과 -->
+  <section class="pp-panel" data-panel="result">
+    <div id="pp-result-warnings" class="pp-warnings" hidden></div>
+
+    <div class="pp-card">
+      <div class="pp-card-head">
+        <h2 id="pp-result-title">분석 결과</h2>
+        <div class="pp-actions">
+          <button type="button" id="pp-download-xlsx" class="pp-btn">엑셀 다운로드</button>
+          <button type="button" id="pp-download-csv" class="pp-btn">CSV 다운로드</button>
+          <button type="button" id="pp-open-save" class="pp-btn pp-btn-primary">저장소에 저장</button>
+        </div>
+      </div>
+      <div id="pp-summary" class="pp-summary-grid"></div>
+      <div class="pp-grid-3 pp-dist">
+        <div><h3>등급 분포</h3><div id="pp-dist-grade" class="pp-bars"></div></div>
+        <div><h3>검토 루트</h3><div id="pp-dist-route" class="pp-bars"></div></div>
+        <div><h3>법적상태</h3><div id="pp-dist-status" class="pp-bars"></div></div>
+      </div>
+    </div>
+
+    <div class="pp-card">
+      <div class="pp-row pp-filters">
+        <input type="search" id="pp-q" class="pp-input" placeholder="문헌번호·명칭·출원인 검색">
+        <select id="pp-filter-grade" class="pp-input"><option value="">등급 전체</option>
+          <option>S</option><option>A</option><option>B</option><option>C</option><option>D</option></select>
+        <select id="pp-filter-gate" class="pp-input">
+          <option value="">Gate 전체</option><option value="pass">Gate 통과</option>
+          <option value="fail">Gate 미통과</option></select>
+        <select id="pp-filter-route" class="pp-input"><option value="">검토 루트 전체</option></select>
+        <select id="pp-page-size" class="pp-input">
+          <option value="50">50행</option><option value="100" selected>100행</option>
+          <option value="200">200행</option><option value="500">500행</option></select>
+      </div>
+      <div class="pp-table-scroll pp-table-tall">
+        <table class="pp-table pp-table-hover" id="pp-result-table">
+          <thead><tr>
+            <th data-sort="rank">순위</th>
+            <th data-sort="docNumber">문헌번호</th>
+            <th data-sort="country">국가</th>
+            <th data-sort="title">발명의 명칭</th>
+            <th data-sort="applicant">출원인</th>
+            <th data-sort="statusLabel">상태</th>
+            <th data-sort="totalScore">총점</th>
+            <th data-sort="grade">등급</th>
+            <th>권리</th><th>기술</th><th>시장</th><th>영향력</th>
+            <th data-sort="forwardCitations">피인용</th>
+            <th>Gate</th><th>검토 루트</th>
+          </tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+      <div class="pp-row pp-pager">
+        <button type="button" id="pp-prev" class="pp-btn">이전</button>
+        <span id="pp-page-info" class="pp-help"></span>
+        <button type="button" id="pp-next" class="pp-btn">다음</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ------------------------------------------------ 5. 저장소 -->
+  <section class="pp-panel" data-panel="library">
+    <div class="pp-card">
+      <div class="pp-card-head">
+        <h2>저장된 분석 결과</h2>
+        <button type="button" id="pp-refresh-runs" class="pp-btn">새로고침</button>
+      </div>
+      <div class="pp-row pp-filters">
+        <select id="pp-runs-department" class="pp-input"><option value="">부서 전체</option></select>
+        <select id="pp-runs-owner" class="pp-input"><option value="">이름 전체</option></select>
+        <select id="pp-runs-project" class="pp-input"><option value="">프로젝트 전체</option></select>
+        <input type="search" id="pp-runs-q" class="pp-input" placeholder="키워드 검색">
+      </div>
+      <div class="pp-table-scroll">
+        <table class="pp-table" id="pp-runs-table">
+          <thead><tr>
+            <th>저장 시각</th><th>부서</th><th>이름</th><th>프로젝트명</th><th>주제</th>
+            <th>문헌</th><th>채점</th><th>평균</th><th>LLM</th><th>작업</th>
+          </tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <!-- ------------------------------------------------ 저장 모달 -->
+  <div id="pp-save-modal" class="pp-modal" hidden>
+    <div class="pp-modal-body">
+      <h2>저장소에 저장</h2>
+      <p class="pp-help">저장 시간은 서버에서 자동 기록됩니다.</p>
+      <label class="pp-field"><span>부서 <b class="pp-req">*</b></span>
+        <input type="text" id="save-department" class="pp-input" list="pp-departments"></label>
+      <datalist id="pp-departments"></datalist>
+      <label class="pp-field"><span>이름 <b class="pp-req">*</b></span>
+        <input type="text" id="save-owner" class="pp-input" list="pp-owners"></label>
+      <datalist id="pp-owners"></datalist>
+      <label class="pp-field"><span>프로젝트명 <b class="pp-req">*</b></span>
+        <input type="text" id="save-project" class="pp-input" list="pp-projects"></label>
+      <datalist id="pp-projects"></datalist>
+      <label class="pp-field"><span>제목(선택)</span><input type="text" id="save-title" class="pp-input"></label>
+      <label class="pp-field"><span>메모(선택)</span><textarea id="save-note" class="pp-input" rows="2"></textarea></label>
+      <div class="pp-actions">
+        <button type="button" id="pp-save-cancel" class="pp-btn">닫기</button>
+        <button type="button" id="pp-save-confirm" class="pp-btn pp-btn-primary">저장</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ------------------------------------------------ 상세 패널 -->
+  <div id="pp-detail" class="pp-drawer" hidden>
+    <div class="pp-drawer-head">
+      <h2 id="pp-detail-title">문헌 상세</h2>
+      <button type="button" id="pp-detail-close" class="pp-btn">닫기</button>
+    </div>
+    <div id="pp-detail-body" class="pp-drawer-body"></div>
+  </div>
+</div>
