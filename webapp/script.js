@@ -96,6 +96,8 @@
     fields: [],
     upload: null,
     mapping: {},
+    applicantGroups: [],
+    applicantState: null,
     mappingReport: null,
     jobId: null,
     runId: null,
@@ -147,6 +149,17 @@
       }
       badge.title = data.storageLocation || "";
 
+      // 배점은 서버 상수에서 받아 표시한다(지표 추가/삭제 시 문구가 어긋나지 않도록).
+      var areaLabels = { rights: "권리", tech: "기술", market: "시장", impact: "영향력" };
+      var parts = (data.areaOrder || Object.keys(data.areaMax || {})).map(function (key) {
+        return (areaLabels[key] || key) + " " + data.areaMax[key];
+      });
+      if (parts.length) {
+        $("pp-subtitle").textContent =
+          "윈텔립스 RAW DATA 기반 핵심특허 스코어링 (" + parts.join(" · ") +
+          " = 총 " + data.totalMax + "점)";
+      }
+
       var problems = (data.degraded || []).slice();
       if (data.storageNote) problems.push(data.storageNote);
       showDegraded(problems, null);
@@ -176,6 +189,7 @@
 
     bindGuide();
     bindUpload();
+    bindApplicants();
     bindMapping();
     bindConfig();
     bindResult();
@@ -453,7 +467,8 @@
       }
       applyUpload(data.upload);
       toast("업로드 완료: " + data.upload.meta.rowCount + "행", "ok");
-      setTab("mapping");
+      setTab("applicant");
+      loadApplicants();
     };
     xhr.onerror = function () { progress.hidden = true; toast("업로드 중 네트워크 오류", "err"); };
     xhr.send(form);
@@ -496,8 +511,12 @@
       sheetRow.hidden = true;
     }
 
+    state.applicantGroups = [];
+    state.applicantState = upload.applicant || null;
     renderPreview(upload);
     renderMapping();
+    renderApplicantStatus();
+    enableTab("applicant", true);
     enableTab("mapping", true);
     enableTab("config", true);
   }
@@ -519,6 +538,188 @@
     });
     table.appendChild(body);
     $("pp-preview-wrap").hidden = false;
+  }
+
+  // ------------------------------------------------------------ 출원인 표준화
+  function bindApplicants() {
+    $("pp-app-rebuild").addEventListener("click", function () { loadApplicants(true); });
+    $("pp-app-approve").addEventListener("click", approveApplicants);
+    $("pp-app-search").addEventListener("input", debounce(renderApplicantTable, 250));
+    $("pp-app-only-merged").addEventListener("change", renderApplicantTable);
+    document.querySelector('.pp-tab[data-tab="applicant"]').addEventListener("click", function () {
+      if (state.upload && !state.applicantGroups.length) loadApplicants();
+    });
+  }
+
+  function loadApplicants(force) {
+    if (!state.upload) return;
+    if (state.applicantGroups.length && !force) return;
+    $("pp-app-status").className = "pp-status";
+    $("pp-app-status").textContent = "출원인 표기를 모으는 중…";
+    request("/api/upload/" + state.upload.uploadId + "/applicants",
+            { method: "POST", body: { mapping: mappingPayload() } })
+      .then(function (data) {
+        state.applicantGroups = data.groups;
+        state.applicantState = data.state;
+        renderApplicantTable();
+        renderApplicantStatus();
+      })
+      .catch(function (error) {
+        state.applicantGroups = [];
+        $("pp-app-status").className = "pp-status pp-status-err";
+        $("pp-app-status").textContent = error.message;
+      });
+  }
+
+  function renderApplicantStatus() {
+    var node = $("pp-app-status");
+    var info = state.applicantState;
+    if (!info || !info.loaded) {
+      node.className = "pp-status pp-status-warn";
+      node.textContent = "표준화 후보가 아직 만들어지지 않았습니다.";
+      $("pp-app-summary").hidden = true;
+      return;
+    }
+    node.className = "pp-status " + (info.approved ? "pp-status-ok" : "pp-status-warn");
+    node.textContent = info.approved
+      ? "승인 완료 (" + info.approvedAt + ") · 표기 " + info.mappedNameCount +
+        "개가 표준명으로 통일되어 분석에 반영됩니다."
+      : "아직 승인하지 않았습니다. 승인 전에는 원본 표기 그대로 분석되며 출원인 기준 점수가 낮게 나올 수 있습니다.";
+
+    var grid = $("pp-app-summary");
+    grid.innerHTML = "";
+    [["표준 출원인", info.groupCount], ["원본 표기", info.variantCount],
+     ["병합된 그룹", info.mergedGroupCount], ["병합 대상 표기", info.mergedVariantCount],
+     ["대상 문헌", info.documentCount]].forEach(function (pair) {
+      var box = el("div", "pp-metric");
+      box.appendChild(el("div", "pp-metric-label", pair[0]));
+      box.appendChild(el("div", "pp-metric-value", esc(pair[1])));
+      grid.appendChild(box);
+    });
+    grid.hidden = false;
+  }
+
+  function renderApplicantTable() {
+    var tbody = document.querySelector("#pp-app-table tbody");
+    tbody.innerHTML = "";
+    var keyword = ($("pp-app-search").value || "").trim().toLowerCase();
+    var onlyMerged = $("pp-app-only-merged").checked;
+    var shown = 0;
+
+    state.applicantGroups.forEach(function (group, index) {
+      if (onlyMerged && (group.variants || []).length < 2) return;
+      if (keyword) {
+        var blob = (group.standardName + " " +
+          (group.variants || []).map(function (v) { return v.raw; }).join(" ")).toLowerCase();
+        if (blob.indexOf(keyword) < 0) return;
+      }
+      shown += 1;
+      var tr = el("tr");
+      if ((group.variants || []).length > 1) tr.className = "pp-app-approved";
+
+      var nameCell = el("td");
+      var input = el("input", "pp-input");
+      input.type = "text";
+      input.value = group.standardName;
+      input.style.width = "100%";
+      input.addEventListener("change", function () {
+        state.applicantGroups[index].standardName = input.value.trim();
+        markApplicantDirty();
+      });
+      nameCell.appendChild(input);
+      tr.appendChild(nameCell);
+
+      var variantCell = el("td");
+      var list = el("div", "pp-variant-list");
+      (group.variants || []).forEach(function (variant, variantIndex) {
+        var chip = el("span", "pp-variant");
+        chip.appendChild(document.createTextNode(variant.raw));
+        chip.appendChild(el("span", "pp-variant-count", variant.count + "건"));
+        if ((group.variants || []).length > 1) {
+          var split = el("button", "pp-variant-split", "×");
+          split.title = "이 표기를 별도 출원인으로 분리";
+          split.addEventListener("click", function () {
+            splitVariant(index, variantIndex);
+          });
+          chip.appendChild(split);
+        }
+        list.appendChild(chip);
+      });
+      variantCell.appendChild(list);
+      tr.appendChild(variantCell);
+      tr.appendChild(el("td", "pp-num", group.count));
+
+      var actionCell = el("td");
+      var reset = el("button", "pp-btn pp-btn-mini", "표준명 복원");
+      reset.addEventListener("click", function () {
+        state.applicantGroups[index].standardName = group.suggestedName;
+        renderApplicantTable();
+        markApplicantDirty();
+      });
+      actionCell.appendChild(reset);
+      tr.appendChild(actionCell);
+      tbody.appendChild(tr);
+    });
+
+    if (!shown) {
+      var tr = el("tr");
+      var td = el("td", "pp-empty",
+        onlyMerged ? "병합된 그룹이 없습니다. 체크를 해제하면 전체 출원인을 볼 수 있습니다."
+                   : "표시할 출원인이 없습니다.");
+      td.colSpan = 4;
+      tr.appendChild(td); tbody.appendChild(tr);
+    }
+  }
+
+  /* 잘못 묶인 표기를 별도 출원인으로 분리한다. */
+  function splitVariant(groupIndex, variantIndex) {
+    var group = state.applicantGroups[groupIndex];
+    var variant = group.variants.splice(variantIndex, 1)[0];
+    group.count -= variant.count;
+    group.variantCount = group.variants.length;
+    state.applicantGroups.splice(groupIndex + 1, 0, {
+      groupId: group.groupId + "-s" + variantIndex,
+      standardName: variant.raw,
+      suggestedName: variant.raw,
+      count: variant.count,
+      variantCount: 1,
+      variants: [variant],
+      aliases: [],
+      needsReview: false
+    });
+    renderApplicantTable();
+    markApplicantDirty();
+  }
+
+  function markApplicantDirty() {
+    if (state.applicantState && state.applicantState.approved) {
+      state.applicantState.approved = false;
+      renderApplicantStatus();
+    }
+  }
+
+  function approveApplicants() {
+    if (!state.upload) { toast("먼저 파일을 업로드하십시오.", "err"); return; }
+    if (!state.applicantGroups.length) { toast("표준화 후보가 없습니다.", "err"); return; }
+    var blank = state.applicantGroups.filter(function (g) {
+      return !String(g.standardName || "").trim();
+    });
+    if (blank.length) { toast("표준명이 비어 있는 그룹이 있습니다.", "err"); return; }
+
+    $("pp-app-approve").disabled = true;
+    request("/api/upload/" + state.upload.uploadId + "/applicants/approve",
+            { method: "POST", body: { groups: state.applicantGroups } })
+      .then(function (data) {
+        $("pp-app-approve").disabled = false;
+        state.applicantState = data.state;
+        renderApplicantStatus();
+        toast("출원인 표준화를 승인했습니다. 이후 분석에 반영됩니다.", "ok");
+        setTab("mapping");
+      })
+      .catch(function (error) {
+        $("pp-app-approve").disabled = false;
+        toast(error.message, "err");
+      });
   }
 
   // ------------------------------------------------------------ 매핑
@@ -667,11 +868,6 @@
       areaBox.appendChild(weightField("area-" + key, areaLabels[key] || key,
                                       config.area_weights[key], 0, 3, 0.1));
     });
-    var globalBox = $("cfg-global-weights");
-    globalBox.innerHTML = "";
-    Object.keys(config.global_country_weights).forEach(function (key) {
-      globalBox.appendChild(weightField("gw-" + key, key, config.global_country_weights[key], 0, 5, 0.1));
-    });
     var marketBox = $("cfg-market-weights");
     marketBox.innerHTML = "";
     Object.keys(config.market_country_weights).forEach(function (key) {
@@ -729,14 +925,11 @@
       representative_country_priority: $("cfg-country-priority").value,
       dedupe_by_family: $("cfg-dedupe").checked,
       rescale_missing_commercial: $("cfg-rescale").checked,
-      area_weights: {}, global_country_weights: {}, market_country_weights: {}
+      area_weights: {}, market_country_weights: {}
     };
     var defaults = state.health.defaultConfig;
     Object.keys(defaults.area_weights).forEach(function (key) {
       config.area_weights[key] = Number($("cfg-area-" + key).value);
-    });
-    Object.keys(defaults.global_country_weights).forEach(function (key) {
-      config.global_country_weights[key] = Number($("cfg-gw-" + key).value);
     });
     Object.keys(defaults.market_country_weights).forEach(function (key) {
       config.market_country_weights[key] = Number($("cfg-mw-" + key).value);
@@ -784,6 +977,16 @@
     }
     var config = collectConfig();
     if (!config.topic_name) { toast("분석 주제명을 입력하십시오.", "err"); return; }
+    if (state.applicantState && !state.applicantState.approved) {
+      if (!window.confirm(
+          "출원인 표준화를 아직 승인하지 않았습니다.\n\n" +
+          "승인 전에는 원본 표기 그대로 분석되어, 같은 회사가 여러 표기로 나뉘면\n" +
+          "출원인 기준 점수(시장 영향력·경쟁사 커버리지)가 낮게 나올 수 있습니다.\n\n" +
+          "이대로 실행하시겠습니까?")) {
+        setTab("applicant");
+        return;
+      }
+    }
 
     $("pp-run").disabled = true;
     $("pp-cancel").hidden = false;

@@ -8,41 +8,40 @@ import io
 import logging
 from typing import Any, Dict, List
 
-from .config import COMPONENT_MAX
+from .config import AREA_LABEL, AREA_MAX, AREA_ORDER, COMPONENT_MAX, TOTAL_MAX
 from .columns import FIELD_BY_KEY
 
 logger = logging.getLogger("primepatent.export")
 
-AREA_LABELS = [("rights", "권리 중요도(30)"), ("tech", "기술 중요도(30)"),
-               ("market", "시장 중요도(20)"), ("impact", "영향력·경쟁성(20)")]
+# 컬럼 라벨은 실제 배점에서 생성한다(지표 추가/삭제 시 헤더가 어긋나지 않도록).
+COMPONENT_LABEL = {
+    "rights.survival": "권리 생존성",
+    "rights.claimScope": "청구범위 강도",
+    "rights.remainingTerm": "잔존기간",
+    "rights.defenseSignal": "권리유지·방어",
+    "tech.topicFit": "Topic 적합도",
+    "tech.contribution": "핵심 기술기여도",
+    "tech.problemEffect": "문제·효과 중요성",
+    "tech.generality": "기술 범용성",
+    "market.entry": "주요 시장 진입도",
+    "market.applicantPower": "출원인 시장 영향력",
+    "market.commercial": "상업화·거래 신호",
+    "market.competitorCoverage": "경쟁사 커버리지",
+    "impact.citation": "연령보정 피인용",
+    "impact.originality": "기술 원천성",
+}
 
-COMPONENT_ORDER = [
-    ("rights.survival", "권리 생존성(8)"),
-    ("rights.claimScope", "청구범위 강도(8)"),
-    ("rights.globalScope", "글로벌 권리범위(7)"),
-    ("rights.remainingTerm", "잔존기간(4)"),
-    ("rights.defenseSignal", "권리유지·방어(3)"),
-    ("tech.topicFit", "Topic 적합도(8)"),
-    ("tech.contribution", "핵심 기술기여도(8)"),
-    ("tech.problemEffect", "문제·효과 중요성(6)"),
-    ("tech.generality", "기술 범용성(4)"),
-    ("tech.followUp", "후속개량·분할(4)"),
-    ("market.entry", "주요 시장 진입도(8)"),
-    ("market.applicantPower", "출원인 시장 영향력(5)"),
-    ("market.commercial", "상업화·거래 신호(4)"),
-    ("market.competitorCoverage", "경쟁사 커버리지(3)"),
-    ("impact.citation", "연령보정 피인용(8)"),
-    ("impact.diffusion", "비자기 확산성(5)"),
-    ("impact.originality", "기술 원천성(4)"),
-    ("impact.conflict", "권리충돌·경쟁(3)"),
-]
+AREA_LABELS = [(key, "%s(%g)" % (AREA_LABEL[key], AREA_MAX[key])) for key in AREA_ORDER]
+
+COMPONENT_ORDER = [(key, "%s(%g)" % (COMPONENT_LABEL[key], COMPONENT_MAX[key]))
+                   for key in COMPONENT_MAX if key in COMPONENT_LABEL]
 
 BASE_COLUMNS = [
     ("rank", "순위"), ("docNumber", "문헌번호"), ("country", "국가"),
     ("title", "발명의 명칭"), ("applicant", "출원인"), ("currentAssignee", "현재권리자"),
     ("statusLabel", "법적상태"), ("priorityDate", "최초우선일"),
     ("applicationDate", "출원일"), ("registrationDate", "등록일"),
-    ("totalScore", "총점(100)"), ("grade", "등급"),
+    ("totalScore", "총점(%g)" % TOTAL_MAX), ("grade", "등급"),
     ("quantScore", "정량점수"), ("llmScore", "LLM점수"),
 ]
 

@@ -119,22 +119,6 @@ class SurvivalTest(unittest.TestCase):
 
 
 class RightsTest(unittest.TestCase):
-    def test_global_scope_weighted_sum_capped(self):
-        record = make_record()
-        ctx, _ = prepare([record])
-        result = score_one(record, None, ctx)
-        component = component_of(result, "rights.globalScope")
-        # KR,US,JP,EP,CN,TW = 1.0+1.5+1.2+1.2+1.3+1.0 = 7.2 → 상한 7
-        self.assertEqual(component["detail"]["countryCount"], 6)
-        self.assertAlmostEqual(component["detail"]["weightSum"], 7.2, places=2)
-        self.assertEqual(component["score"], 7.0)
-
-    def test_global_scope_single_country(self):
-        record = make_record(**{"WIPS패밀리 문헌번호(출원기준)": "KR1020190001234"})
-        ctx, _ = prepare([record])
-        component = component_of(score_one(record, None, ctx), "rights.globalScope")
-        self.assertEqual(component["score"], 1.0)
-
     def test_remaining_term_bands(self):
         # 기준일 2026-08-25, 잔존 = 20년 - 경과년수
         for priority, expected in [("2019-01-10", 4.0),   # 잔존 12.4년
@@ -231,12 +215,6 @@ class MarketImpactTest(unittest.TestCase):
         self.assertLess(scores[1], scores[2])
         self.assertEqual(scores[0], 0.0)   # 피인용 0건은 백분위 0
 
-    def test_non_self_diffusion_ratio(self):
-        record = make_record()          # 피인용 10건 중 타인 2건
-        ctx, _ = prepare([record])
-        component = component_of(score_one(record, None, ctx), "impact.diffusion")
-        self.assertAlmostEqual(component["detail"]["nonSelfRatio"], 0.2, places=3)
-
     def test_originality_favors_earlier_priority(self):
         early = make_record(**{"출원번호": "KR-E", "WIPS패밀리 ID": "FE", "최우선출원일": "2012-01-01"})
         late = make_record(**{"출원번호": "KR-L", "WIPS패밀리 ID": "FL", "최우선출원일": "2024-01-01"})
@@ -256,9 +234,10 @@ class TotalsTest(unittest.TestCase):
             for component in area["components"]:
                 self.assertLessEqual(component["score"], component["max"] + 1e-9,
                                      component["key"])
-        self.assertAlmostEqual(result["totalMax"], 100.0, places=6)
-        self.assertAlmostEqual(result["quantMax"] + result["llmMax"], 100.0, places=6)
-        self.assertLessEqual(result["totalScore"], 100.0)
+        from primepatent.config import TOTAL_MAX
+        self.assertAlmostEqual(result["totalMax"], TOTAL_MAX, places=6)
+        self.assertAlmostEqual(result["quantMax"] + result["llmMax"], TOTAL_MAX, places=6)
+        self.assertLessEqual(result["totalScore"], TOTAL_MAX)
 
     def test_every_component_reports_quant_and_llm_maxima(self):
         """세부지표마다 정량/LLM 배점 상한이 노출되고 합이 배점과 같아야 한다."""
@@ -291,11 +270,11 @@ class TotalsTest(unittest.TestCase):
         self.assertAlmostEqual(component["score"],
                                component["quantScore"] + component["llmScore"], places=6)
 
-    def test_quant_llm_split_is_70_30(self):
+    def test_quant_llm_split(self):
         record = make_record()
         ctx, _ = prepare([record])
         result = score_one(record, analysis_defaults(status="ok"), ctx)
-        self.assertAlmostEqual(result["quantMax"], 71.0, places=6)
+        self.assertAlmostEqual(result["quantMax"], 52.0, places=6)
         self.assertAlmostEqual(result["llmMax"], 29.0, places=6)
 
     def test_result_is_json_serializable_with_iso_dates(self):
@@ -316,8 +295,10 @@ class TotalsTest(unittest.TestCase):
         build_families([record], config, AS_OF)
         ctx = AnalysisContext([record], config, AS_OF)
         result = score_one(record, None, ctx)
-        self.assertAlmostEqual(result["totalMax"], 130.0, places=6)
-        self.assertAlmostEqual(result["areas"]["rights"]["weightedMax"], 60.0, places=6)
+        from primepatent.config import AREA_MAX, TOTAL_MAX
+        self.assertAlmostEqual(result["totalMax"], TOTAL_MAX + AREA_MAX["rights"], places=6)
+        self.assertAlmostEqual(result["areas"]["rights"]["weightedMax"],
+                               AREA_MAX["rights"] * 2, places=6)
 
     def test_ranking_is_descending(self):
         records = [make_record(**{"출원번호": "KR%d" % i, "WIPS패밀리 ID": "F%d" % i,

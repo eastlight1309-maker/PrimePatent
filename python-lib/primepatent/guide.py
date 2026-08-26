@@ -10,20 +10,21 @@ from __future__ import annotations
 from typing import Any, Dict, List
 
 from .columns import FIELDS
-from .config import (COMPONENT_MAX, COMPONENT_SOURCE, DEFAULT_GLOBAL_COUNTRY_WEIGHTS,
-                     DEFAULT_GLOBAL_OTHER_WEIGHT, DEFAULT_MARKET_COUNTRY_WEIGHTS,
-                     REMAINING_TERM_BANDS, SURVIVAL_SCORES, ScoringConfig, mixed_max)
+from .config import (AREA_LABEL, AREA_ORDER, COMPONENT_MAX, COMPONENT_SOURCE,
+                     DEFAULT_MARKET_COUNTRY_WEIGHTS, REMAINING_TERM_BANDS,
+                     SURVIVAL_SCORES, ScoringConfig, mixed_max)
 from .scoring.engine import GRADE_BANDS
 from .status import STATUS_LABEL
 
 SOURCE_LABEL = {"quant": "정량", "llm": "LLM", "mixed": "정량+LLM"}
 
-AREA_INFO = [
-    ("rights", "권리 중요도", "권리의 범위, 존속 가능성, 국가 확장성을 본다."),
-    ("tech", "기술 중요도", "주제 적합성, 기술 핵심성, 해결과제·효과를 본다."),
-    ("market", "시장 중요도", "주요 시장 진입, 경쟁사 관심, 상업화 가능성을 본다."),
-    ("impact", "영향력·경쟁성", "후속 특허에 미친 영향과 경쟁 강도를 본다."),
-]
+AREA_SUMMARY = {
+    "rights": "권리의 생존 가능성과 청구범위의 강도를 본다.",
+    "tech": "주제 적합성, 기술 핵심성, 해결과제·효과를 본다.",
+    "market": "주요 시장 진입, 경쟁사 관심, 상업화 가능성을 본다.",
+    "impact": "후속 특허에 미친 영향과 기술 원천성을 본다.",
+}
+AREA_INFO = [(key, AREA_LABEL[key], AREA_SUMMARY[key]) for key in AREA_ORDER]
 
 # 세부지표별 설명 (배점은 COMPONENT_MAX 에서 자동으로 채워진다)
 COMPONENT_INFO: Dict[str, Dict[str, Any]] = {
@@ -52,15 +53,6 @@ COMPONENT_INFO: Dict[str, Dict[str, Any]] = {
                   ("실시예 수준의 좁은 권리·회피 용이", "LLM 1"),
                   ("실질적 보호범위 부족(청구항 없음 포함)", "LLM 0")],
         "fields": ["청구항 수", "독립항 수", "대표청구항", "독립청구항"],
-    },
-    "rights.globalScope": {
-        "label": "글로벌 권리범위",
-        "how": "패밀리의 **고유 국가**에 가중치를 부여해 합산한다. 미국 continuation 이나 일본 "
-               "분할출원이 많아도 국가 커버리지가 넓어지는 것은 아니므로 건수가 아닌 국가 수를 쓴다.",
-        "formula": "Σ 국가가중치 (상한 7)",
-        "weights": DEFAULT_GLOBAL_COUNTRY_WEIGHTS,
-        "weightsOther": DEFAULT_GLOBAL_OTHER_WEIGHT,
-        "fields": ["WIPS패밀리 문헌번호(출원기준)", "국가코드", "지정국 코드"],
     },
     "rights.remainingTerm": {
         "label": "잔존기간",
@@ -119,13 +111,6 @@ COMPONENT_INFO: Dict[str, Dict[str, Any]] = {
         "formula": "MIN(4, LLM 범용성(0~4)×0.75 + CPC 서브그룹수 백분위×1)",
         "fields": ["독립청구항", "Current CPC All"],
     },
-    "tech.followUp": {
-        "label": "후속개량·분할 신호",
-        "how": "후속 개량이 이어졌는지를 본다. 장치·방법·시스템 등 복수 카테고리 독립항이 있으면 "
-               "권리 설계가 촘촘하다는 신호로 본다.",
-        "formula": "분할·계속출원 2 + 패밀리 내 후속출원 1 + 복수 청구항 카테고리 1",
-        "fields": ["분할출원 여부", "WIPS패밀리 문헌 수(출원기준)", "독립청구항"],
-    },
     "market.entry": {
         "label": "주요 시장 진입도",
         "how": "패밀리 **전체** 기준으로 주요 소비시장·제조 공급망 국가 진입 여부를 가중 합산한다. "
@@ -164,12 +149,6 @@ COMPONENT_INFO: Dict[str, Dict[str, Any]] = {
         "formula": "PERCENTRANK( LN(1+피인용수) ) × 8",
         "fields": ["피인용 문헌 수(F1)", "최우선출원일", "공개일"],
     },
-    "impact.diffusion": {
-        "label": "비자기·다출원인 확산성",
-        "how": "자기인용 비중이 높은 특허보다 여러 경쟁사로 확산된 특허를 산업 영향력이 크다고 본다.",
-        "formula": "비자기 피인용 비율×2 + 고유 피인용 출원인수 백분위×3",
-        "fields": ["타인 피인용 문헌번호(F1)", "자기 피인용 문헌번호(F1)", "피인용 문헌 수(F1)"],
-    },
     "impact.originality": {
         "label": "기술 원천성",
         "how": "주제 내에서 얼마나 이른 시점의 출원인지, 이후 경쟁사로 얼마나 확산되었는지를 본다. "
@@ -177,14 +156,6 @@ COMPONENT_INFO: Dict[str, Dict[str, Any]] = {
                "(백분위 0.2~0.8)에서 만점을 준다.",
         "formula": "(1−우선일 백분위)×1.5 + 확산성 1.5 + 후방인용 구조 1",
         "fields": ["최우선출원일", "인용 문헌 수(B1)", "타인 피인용 문헌번호(F1)"],
-    },
-    "impact.conflict": {
-        "label": "권리충돌·경쟁 신호",
-        "how": "무효·이의·심판은 그 특허가 실제로 방해가 되었다는 신호다. 단, 무효로 확정된 특허는 "
-               "권리 생존성에서 0점으로 크게 감점된다.",
-        "formula": "심판·분쟁 1.5 + 제3자 인용·이의 0.5 + 양도·실시권 1.0",
-        "fields": ["심판 전체 횟수", "심판 종류", "소송 전체 횟수", "심사관인용 문헌번호(FE)",
-                   "실시권 설정 유무", "권리변동 유무"],
     },
 }
 
@@ -196,7 +167,7 @@ RULES = [
         "how": "패밀리별로 대표문헌 1건을 골라 채점한다. 우선순위는 "
                "등록·존속 > 등록·소멸 > 공개·심사중 > 거절·취하 이고, 동순위면 "
                "국가 우선순위 → 청구항 수 → 피인용 수 → 이른 우선일 순으로 정한다.",
-        "note": "권리 점수는 대표문헌 개별 국가 기준, 시장·글로벌 점수는 패밀리 전체 기준으로 계산한다.",
+        "note": "권리 점수는 대표문헌 개별 국가 기준, 시장 진입도는 패밀리 전체 기준으로 계산한다.",
     },
     {
         "title": "② 동일 주제·출원연도 안에서 비교(백분위)",
@@ -226,7 +197,16 @@ RULES = [
                "표기한다. 확보된 항목만으로 만점 환산하려면 설정에서 옵션을 켠다.",
     },
     {
-        "title": "⑥ LLM 분석에 실패한 문헌",
+        "title": "⑥ 출원인 표준화는 승인이 필요하다",
+        "why": "같은 회사가 여러 표기로 흩어져 있으면 출원인 기준 통계(시장 영향력, 경쟁사 "
+               "커버리지, 자기인용 판정)가 모두 어긋난다.",
+        "how": "업로드 직후 표기를 자동으로 묶어 후보를 보여 주고, 사용자가 표준명을 확정해 "
+               "승인하면 그때부터 분석에 반영한다. 승인 전에는 원본 표기를 그대로 사용한다.",
+        "note": "WIPS 대표명화 코드/영문명이 같으면 한글·영문 표기도 같은 그룹으로 묶는다. "
+                "잘못 묶인 표기는 × 버튼으로 분리할 수 있다.",
+    },
+    {
+        "title": "⑦ LLM 분석에 실패한 문헌",
         "why": "점수를 임의로 보정하면 근거 없는 값이 섞인다.",
         "how": "LLM 점수 0점으로 두고 사유를 결과의 주의사항에 남긴다. LLM 을 끄면 정량 구간만 "
                "계산되며, 그 사실이 경고로 표시된다.",
@@ -243,14 +223,17 @@ ROUTES = [
 STEPS = [
     ("1. 업로드", "윈텔립스(WIPS ON)에서 내려받은 엑셀·CSV 를 올린다. 상단에 검색식 안내 행이 "
                   "있어도 헤더 행을 자동으로 찾는다."),
-    ("2. 컬럼 매핑", "엑셀 컬럼을 표준 필드에 자동 매핑한다. 화면에 보이는 매핑 상태가 그대로 "
+    ("2. 출원인 표준화", "같은 회사의 여러 표기(삼성전자(주) / 삼성전자 주식회사 / SAMSUNG "
+                        "ELECTRONICS CO., LTD.)를 하나로 묶어 표준명을 확정한다. "
+                        "**승인한 이후에만** 분석에 반영되며, 승인 전에는 원본 표기를 그대로 쓴다."),
+    ("3. 컬럼 매핑", "엑셀 컬럼을 표준 필드에 자동 매핑한다. 화면에 보이는 매핑 상태가 그대로 "
                      "실행되므로, 필요한 항목만 수정하면 된다."),
-    ("3. 분석 설정", "분석 주제(Primary Topic)와 키워드, 사용할 LLM, Gate 기준, 비교집단, "
+    ("4. 분석 설정", "분석 주제(Primary Topic)와 키워드, 사용할 LLM, Gate 기준, 비교집단, "
                      "국가 가중치를 정한다. 주제와 키워드가 LLM 판정의 기준이 된다."),
-    ("4. 실행", "백그라운드로 실행되며 진행률이 표시되고 도중에 취소할 수 있다."),
-    ("5. 결과", "총점 순으로 정렬된 목록에서 행을 클릭하면 18개 세부지표의 점수와 산출 근거를 "
+    ("5. 실행", "백그라운드로 실행되며 진행률이 표시되고 도중에 취소할 수 있다."),
+    ("6. 결과", "총점 순으로 정렬된 목록에서 행을 클릭하면 18개 세부지표의 점수와 산출 근거를 "
                 "모두 볼 수 있다. 엑셀·CSV 로 내려받을 수 있다."),
-    ("6. 저장소", "부서·이름·프로젝트명을 입력해 저장하면(저장 시각 자동 기록) 나중에 다시 "
+    ("7. 저장소", "부서·이름·프로젝트명을 입력해 저장하면(저장 시각 자동 기록) 나중에 다시 "
                   "불러오거나 내려받을 수 있다."),
 ]
 

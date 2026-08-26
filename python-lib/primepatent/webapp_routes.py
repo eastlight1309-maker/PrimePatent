@@ -18,9 +18,10 @@ from urllib.parse import quote
 
 from flask import jsonify, request, send_file
 
+from .applicants import build_name_map, cluster_applicants, collect_applicants
 from .columns import field_catalog
-from .config import (ALLOWED_LLM_CANDIDATES, ALLOWED_LLM_IDS, AREA_MAX,
-                     COMPONENT_MAX, DEFAULT_LLM_ID, ScoringConfig)
+from .config import (ALLOWED_LLM_CANDIDATES, ALLOWED_LLM_IDS, AREA_MAX, AREA_ORDER,
+                     COMPONENT_MAX, DEFAULT_LLM_ID, TOTAL_MAX, ScoringConfig)
 from .export import export_bytes, export_filename
 from .guide import build_guide
 from .jobs import DONE, JobManager
@@ -276,7 +277,10 @@ def register_routes(app, state: Optional[AppState] = None) -> AppState:
             "llmCandidates": [{"label": label, "id": llm_id}
                               for label, llm_id in ALLOWED_LLM_CANDIDATES],
             "defaultLlmId": DEFAULT_LLM_ID,
+            # JSON 키 정렬 때문에 순서가 깨지므로 순서는 배열로 따로 내려준다
             "areaMax": AREA_MAX,
+            "areaOrder": AREA_ORDER,
+            "totalMax": TOTAL_MAX,
             "componentMax": COMPONENT_MAX,
             "defaultConfig": ScoringConfig().to_dict(),
         })
@@ -335,6 +339,69 @@ def register_routes(app, state: Optional[AppState] = None) -> AppState:
         report = mapping_report(session.headers, mapping)
         return jsonify({"ok": True, "mapping": mapping, "mappingReport": report})
 
+    # ------------------------------------------------------------- 출원인 표준화
+    @app.route("/api/upload/<upload_id>/applicants", methods=["POST"])
+    def api_applicants(upload_id):
+        """업로드 데이터에서 출원인 표기를 모아 표준화 후보 그룹을 만든다."""
+        body = _json_body()
+        try:
+            session = state.uploads.get(upload_id)
+        except UploadError as exc:
+            return _error(str(exc))
+        mapping = resolve_mapping(session.headers, body.get("mapping"))
+        if "applicant" not in mapping and "applicantNormalized" not in mapping:
+            return _error("출원인 컬럼이 매핑되지 않아 표준화를 진행할 수 없습니다. "
+                          "컬럼 매핑에서 '출원인' 을 지정하십시오.")
+        try:
+            _headers, rows, _meta = state.uploads.rows(session)
+        except Exception as exc:
+            logger.exception("출원인 수집 실패")
+            return _error("업로드 파일을 다시 읽지 못했습니다: %s" % exc, 500)
+
+        entries = collect_applicants(rows, mapping)
+        session.applicant_groups = cluster_applicants(entries)
+        session.applicant_approved = False
+        session.applicant_approved_at = None
+        session.applicant_map = {}
+        return jsonify({"ok": True, "groups": session.applicant_groups,
+                        "state": session.applicant_state()})
+
+    @app.route("/api/upload/<upload_id>/applicants/approve", methods=["POST"])
+    def api_applicants_approve(upload_id):
+        """사용자가 확정한 표준명을 승인 처리한다. 승인 후에만 분석에 반영된다."""
+        body = _json_body()
+        try:
+            session = state.uploads.get(upload_id)
+        except UploadError as exc:
+            return _error(str(exc))
+
+        groups = body.get("groups")
+        if not isinstance(groups, list) or not groups:
+            return _error("승인할 출원인 그룹이 없습니다. 먼저 표준화 후보를 생성하십시오.")
+        blank = [g.get("groupId") for g in groups
+                 if not str(g.get("standardName") or "").strip()]
+        if blank:
+            return _error("표준명이 비어 있는 그룹이 있습니다: %s" % ", ".join(map(str, blank[:5])))
+
+        session.applicant_groups = groups
+        session.applicant_map = build_name_map(groups)
+        session.applicant_approved = True
+        from .storage import now_iso
+        session.applicant_approved_at = now_iso()
+        logger.info("출원인 표준화 승인: %s (%d개 표기)", upload_id, len(session.applicant_map))
+        return jsonify({"ok": True, "state": session.applicant_state()})
+
+    @app.route("/api/upload/<upload_id>/applicants/reset", methods=["POST"])
+    def api_applicants_reset(upload_id):
+        try:
+            session = state.uploads.get(upload_id)
+        except UploadError as exc:
+            return _error(str(exc))
+        session.applicant_approved = False
+        session.applicant_approved_at = None
+        session.applicant_map = {}
+        return jsonify({"ok": True, "state": session.applicant_state()})
+
     @app.route("/api/upload/<upload_id>", methods=["DELETE"])
     def api_upload_delete(upload_id):
         state.uploads.drop(upload_id)
@@ -358,14 +425,19 @@ def register_routes(app, state: Optional[AppState] = None) -> AppState:
             return _error("설정 값이 올바르지 않습니다: %s" % exc)
         user_mapping = body.get("mapping")
 
+        # 승인된 경우에만 출원인 표준화를 반영한다(승인 전에는 원본 표기 사용).
+        applicant_map = dict(session.applicant_map) if session.applicant_approved else None
+
         def target(job):
             headers, rows, meta = state.uploads.rows(session)
             meta["uploadId"] = upload_id
+            meta["applicantApprovedAt"] = session.applicant_approved_at
             try:
                 return run_analysis(
                     headers, rows, user_mapping, config, meta,
                     progress=lambda phase, ratio, message: job.update(phase, ratio, message),
-                    cancel_event=job.cancel_event, llm_cache=state.llm_cache)
+                    cancel_event=job.cancel_event, llm_cache=state.llm_cache,
+                    applicant_map=applicant_map)
             except PipelineCancelled:
                 job.cancel()
                 raise

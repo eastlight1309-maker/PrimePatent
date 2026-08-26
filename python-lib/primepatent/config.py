@@ -24,22 +24,14 @@ DEFAULT_LLM_ID = "azureopenai:DW_AOAI_APIM_DES1_LOW:gpt-5-mini"
 ALLOWED_LLM_IDS = frozenset(llm_id for _, llm_id in ALLOWED_LLM_CANDIDATES)
 
 # =========================
-# 영역별 총배점 (합계 100)
+# 세부지표 배점
 # =========================
-AREA_MAX = {
-    "rights": 30.0,   # 권리 중요도
-    "tech": 30.0,     # 기술 중요도
-    "market": 20.0,   # 시장 중요도
-    "impact": 20.0,   # 영향력·경쟁성
-}
-TOTAL_MAX = 100.0
-
-# 세부지표 배점 (스펙 8.1 최종 계산식)
+# 영역 합계(AREA_MAX)와 총점(TOTAL_MAX)은 아래 표에서 자동 계산된다.
+# 지표를 추가/삭제해도 합계가 어긋나지 않게 하기 위함이다.
 COMPONENT_MAX = {
     # 권리 중요도 30
     "rights.survival": 8.0,
     "rights.claimScope": 8.0,          # 정량 4 + LLM 4
-    "rights.globalScope": 7.0,
     "rights.remainingTerm": 4.0,
     "rights.defenseSignal": 3.0,
     # 기술 중요도 30
@@ -47,7 +39,6 @@ COMPONENT_MAX = {
     "tech.contribution": 8.0,
     "tech.problemEffect": 6.0,         # 문제 3 + 효과 3
     "tech.generality": 4.0,            # LLM 3 + CPC 1
-    "tech.followUp": 4.0,
     # 시장 중요도 20
     "market.entry": 8.0,
     "market.applicantPower": 5.0,
@@ -55,31 +46,40 @@ COMPONENT_MAX = {
     "market.competitorCoverage": 3.0,
     # 영향력·경쟁성 20
     "impact.citation": 8.0,
-    "impact.diffusion": 5.0,
     "impact.originality": 4.0,
-    "impact.conflict": 3.0,
 }
 
-# 세부지표별 산출 방식(정량/LLM) - 정량 70 : LLM 30 집계에 사용
+AREA_ORDER = ["rights", "tech", "market", "impact"]
+AREA_LABEL = {
+    "rights": "권리 중요도",
+    "tech": "기술 중요도",
+    "market": "시장 중요도",
+    "impact": "영향력·경쟁성",
+}
+AREA_MAX = {
+    area: round(sum(score for key, score in COMPONENT_MAX.items()
+                    if key.split(".")[0] == area), 6)
+    for area in AREA_ORDER
+}
+TOTAL_MAX = round(sum(AREA_MAX.values()), 6)
+
+
+# 세부지표별 산출 방식(정량/LLM)
 COMPONENT_SOURCE = {
     "rights.survival": "quant",
     "rights.claimScope": "mixed",      # 정량 4 / LLM 4
-    "rights.globalScope": "quant",
     "rights.remainingTerm": "quant",
     "rights.defenseSignal": "quant",
     "tech.topicFit": "llm",
     "tech.contribution": "llm",
     "tech.problemEffect": "llm",
     "tech.generality": "mixed",        # LLM 3 / 정량 1
-    "tech.followUp": "quant",
     "market.entry": "quant",
     "market.applicantPower": "quant",
     "market.commercial": "quant",
     "market.competitorCoverage": "quant",
     "impact.citation": "quant",
-    "impact.diffusion": "quant",
     "impact.originality": "quant",
-    "impact.conflict": "quant",
 }
 
 # mixed(정량+LLM) 세부지표의 배점 분해 (정량 상한, LLM 상한)
@@ -99,12 +99,6 @@ def mixed_max(component_key):
         return 0.0, maximum
     return COMPONENT_MIXED_SPLIT.get(component_key, (maximum / 2.0, maximum / 2.0))
 
-
-# 4.3 글로벌 권리범위 - 국가 가중치 (합계 상한 7점)
-DEFAULT_GLOBAL_COUNTRY_WEIGHTS = {
-    "US": 1.5, "CN": 1.3, "EP": 1.2, "JP": 1.2, "KR": 1.0, "TW": 1.0,
-}
-DEFAULT_GLOBAL_OTHER_WEIGHT = 0.3
 
 # 6.1 주요 시장 진입도 - 국가 가중치 (합계 상한 8점)
 # 스펙 본문의 소비/공급망 분리 서술을 하나의 표로 합친 값(스펙 내 엑셀 수식 기준).
@@ -158,9 +152,6 @@ class ScoringConfig:
     dedupe_by_family: bool = True
 
     # 국가 가중치
-    global_country_weights: Dict[str, float] = field(
-        default_factory=lambda: dict(DEFAULT_GLOBAL_COUNTRY_WEIGHTS))
-    global_other_weight: float = DEFAULT_GLOBAL_OTHER_WEIGHT
     market_country_weights: Dict[str, float] = field(
         default_factory=lambda: dict(DEFAULT_MARKET_COUNTRY_WEIGHTS))
 
@@ -242,9 +233,6 @@ class ScoringConfig:
         for key in AREA_MAX:
             self.area_weights.setdefault(key, 1.0)
             self.area_weights[key] = _clamp(float(self.area_weights[key]), 0.0, 3.0)
-        self.global_country_weights = {
-            str(k).upper(): _clamp(float(v), 0.0, 5.0)
-            for k, v in self.global_country_weights.items() if str(k).strip()}
         self.market_country_weights = {
             str(k).upper(): _clamp(float(v), 0.0, 8.0)
             for k, v in self.market_country_weights.items() if str(k).strip()}

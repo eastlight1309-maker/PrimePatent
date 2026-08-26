@@ -24,14 +24,15 @@ class GuideDataTest(unittest.TestCase):
 
     def test_totals_match_scoring_constants(self):
         self.assertEqual(self.guide["totalMax"], sum(COMPONENT_MAX.values()))
-        self.assertEqual(self.guide["totalMax"], 100.0)
-        self.assertAlmostEqual(self.guide["quantMax"] + self.guide["llmMax"], 100.0, places=6)
+        self.assertEqual(self.guide["totalMax"], 81.0)
+        self.assertAlmostEqual(self.guide["quantMax"] + self.guide["llmMax"],
+                               self.guide["totalMax"], places=6)
 
     def test_every_component_is_documented(self):
         documented = {component["key"]
                       for area in self.guide["areas"] for component in area["components"]}
         self.assertEqual(documented, set(COMPONENT_MAX.keys()))
-        self.assertEqual(len(documented), 18)
+        self.assertEqual(len(documented), len(COMPONENT_MAX))
         # 설명 사전에 누락/잉여가 없어야 한다
         self.assertEqual(set(COMPONENT_INFO.keys()), set(COMPONENT_MAX.keys()))
 
@@ -45,7 +46,7 @@ class GuideDataTest(unittest.TestCase):
 
     def test_area_totals(self):
         totals = {area["key"]: area["max"] for area in self.guide["areas"]}
-        self.assertEqual(totals, {"rights": 30.0, "tech": 30.0, "market": 20.0, "impact": 20.0})
+        self.assertEqual(totals, {"rights": 23.0, "tech": 26.0, "market": 20.0, "impact": 12.0})
 
     def test_every_component_has_explanation(self):
         for area in self.guide["areas"]:
@@ -55,16 +56,15 @@ class GuideDataTest(unittest.TestCase):
 
     def test_country_weights_keep_declared_order(self):
         component = [c for area in self.guide["areas"] for c in area["components"]
-                     if c["key"] == "rights.globalScope"][0]
+                     if c["key"] == "market.entry"][0]
         countries = [item["country"] for item in component["weights"]]
         self.assertEqual(countries[0], "US")        # 가중치가 큰 순서로 선언됨
         self.assertIn("TW", countries)
-        self.assertIsNotNone(component["weightsOther"])
 
     def test_grades_and_routes_present(self):
         self.assertEqual([g["grade"] for g in self.guide["grades"]], ["S", "A", "B", "C", "D"])
         self.assertEqual(len(self.guide["routes"]), 4)
-        self.assertEqual(len(self.guide["steps"]), 6)
+        self.assertEqual(len(self.guide["steps"]), 7)
         self.assertGreaterEqual(len(self.guide["rules"]), 5)
 
     def test_field_groups_cover_catalog(self):
@@ -90,9 +90,9 @@ class GuideApiTest(unittest.TestCase):
         payload = self.client.get("/api/guide").get_json()
         self.assertTrue(payload["ok"])
         guide = payload["guide"]
-        self.assertEqual(guide["totalMax"], 100.0)
+        self.assertEqual(guide["totalMax"], 81.0)
         self.assertEqual(len(guide["areas"]), 4)
-        self.assertEqual(sum(len(a["components"]) for a in guide["areas"]), 18)
+        self.assertEqual(sum(len(a["components"]) for a in guide["areas"]), len(COMPONENT_MAX))
 
 
 if __name__ == "__main__":

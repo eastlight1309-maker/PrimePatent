@@ -69,6 +69,62 @@ def to_list(value: Any) -> List[str]:
     return out
 
 
+# 콤마 뒤에 오면 법인명의 일부로 보아 분리하지 않을 접미사
+_CORP_SUFFIX_TOKENS = (
+    "ltd", "ltd.", "co", "co.", "inc", "inc.", "llc", "llp", "corp", "corp.",
+    "limited", "incorporated", "corporation", "company", "gmbh", "ag", "sa", "s.a.",
+    "nv", "n.v.", "bv", "b.v.", "plc", "kk", "k.k.", "pte", "pte.", "pty", "srl",
+    "s.r.l.", "spa", "s.p.a.", "oy", "ab", "as", "a/s", "kg", "mbh", "sas", "sarl",
+    "주식회사", "유한회사", "(주)", "(유)",
+)
+
+
+def to_entity_list(value: Any) -> List[str]:
+    """출원인·발명자처럼 **이름**이 들어오는 다중값 셀 파서.
+
+    ``to_list`` 는 ", " 에서도 분리하므로 "SAMSUNG ELECTRONICS CO., LTD." 가
+    두 개의 출원인으로 쪼개진다. 여기서는 세미콜론/파이프/개행/탭으로만 나누고,
+    콤마는 뒤 토막이 법인격 표기가 아닐 때만 분리한다.
+    """
+    if is_blank(value):
+        return []
+    if isinstance(value, (list, tuple, set)):
+        raw_parts = [to_text(v) for v in value]
+    else:
+        raw_parts = re.split(r"[;|\n\r\t]+", to_text(value))
+
+    out: List[str] = []
+    seen = set()
+    for part in raw_parts:
+        for name in _split_names_on_comma(part):
+            name = name.strip().strip("'\"")
+            if not name or name == "-":
+                continue
+            if name not in seen:
+                seen.add(name)
+                out.append(name)
+    return out
+
+
+def _split_names_on_comma(text: str) -> List[str]:
+    """콤마 분리하되 법인격 접미사 앞의 콤마는 유지한다."""
+    segments = [seg.strip() for seg in text.split(",")]
+    if len(segments) <= 1:
+        return [text.strip()] if text.strip() else []
+    names: List[str] = []
+    for segment in segments:
+        if not segment:
+            continue
+        head = segment.split()[0].lower().rstrip(".,") if segment.split() else ""
+        is_suffix = (segment.lower() in _CORP_SUFFIX_TOKENS
+                     or head in {t.rstrip(".") for t in _CORP_SUFFIX_TOKENS})
+        if is_suffix and names:
+            names[-1] = names[-1] + ", " + segment
+        else:
+            names.append(segment)
+    return names
+
+
 def to_int(value: Any, default: Optional[int] = None) -> Optional[int]:
     number = to_float(value, None)
     if number is None:

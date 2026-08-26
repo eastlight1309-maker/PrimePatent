@@ -2,7 +2,7 @@
   <header class="pp-header">
     <div class="pp-title">
       <h1>PrimePatent</h1>
-      <span class="pp-subtitle">윈텔립스 RAW DATA 기반 핵심특허 스코어링 (권리 30 · 기술 30 · 시장 20 · 영향력 20)</span>
+      <span class="pp-subtitle" id="pp-subtitle">윈텔립스 RAW DATA 기반 핵심특허 스코어링</span>
     </div>
     <div class="pp-header-meta">
       <span id="pp-storage-badge" class="pp-badge pp-badge-muted">저장소 확인 중</span>
@@ -12,10 +12,11 @@
 
   <nav class="pp-tabs" role="tablist">
     <button class="pp-tab pp-tab-active" data-tab="upload" type="button">1. 업로드</button>
-    <button class="pp-tab" data-tab="mapping" type="button" disabled>2. 컬럼 매핑</button>
-    <button class="pp-tab" data-tab="config" type="button" disabled>3. 분석 설정</button>
-    <button class="pp-tab" data-tab="result" type="button" disabled>4. 결과</button>
-    <button class="pp-tab" data-tab="library" type="button">5. 저장소</button>
+    <button class="pp-tab" data-tab="applicant" type="button" disabled>2. 출원인 표준화</button>
+    <button class="pp-tab" data-tab="mapping" type="button" disabled>3. 컬럼 매핑</button>
+    <button class="pp-tab" data-tab="config" type="button" disabled>4. 분석 설정</button>
+    <button class="pp-tab" data-tab="result" type="button" disabled>5. 결과</button>
+    <button class="pp-tab" data-tab="library" type="button">6. 저장소</button>
     <button class="pp-tab pp-tab-help" data-tab="guide" type="button">? 설명</button>
   </nav>
 
@@ -57,7 +58,44 @@
     </div>
   </section>
 
-  <!-- ------------------------------------------------ 2. 매핑 -->
+  <!-- ------------------------------------------------ 2. 출원인 표준화 -->
+  <section class="pp-panel" data-panel="applicant">
+    <div class="pp-card">
+      <div class="pp-card-head">
+        <h2>출원인 표준화</h2>
+        <div class="pp-actions">
+          <button type="button" id="pp-app-rebuild" class="pp-btn">후보 다시 만들기</button>
+          <button type="button" id="pp-app-approve" class="pp-btn pp-btn-primary">승인하고 다음 단계로 →</button>
+        </div>
+      </div>
+      <p class="pp-help">
+        같은 회사가 <b>삼성전자(주) / 삼성전자 주식회사 / SAMSUNG ELECTRONICS CO., LTD.</b> 처럼
+        여러 표기로 나뉘어 있으면 출원인 기준 점수(시장 영향력·경쟁사 커버리지)가 모두 낮게 나옵니다.
+        아래 그룹을 검토해 표준명을 확정하고 <b>승인</b>하십시오.
+        <b>승인한 이후에만</b> 분석에 반영됩니다.
+      </p>
+      <div id="pp-app-status" class="pp-status"></div>
+      <div id="pp-app-summary" class="pp-summary-grid" hidden></div>
+      <div class="pp-row">
+        <input type="search" id="pp-app-search" class="pp-input" placeholder="출원인명 검색">
+        <label class="pp-check"><input type="checkbox" id="pp-app-only-merged" checked>
+          병합된 그룹만 보기 (표기가 2개 이상)</label>
+      </div>
+      <div class="pp-table-scroll pp-table-tall">
+        <table class="pp-table" id="pp-app-table">
+          <thead><tr>
+            <th style="width:30%">표준명 (수정 가능)</th>
+            <th style="width:52%">원본 표기</th>
+            <th style="width:9%">문헌</th>
+            <th style="width:9%">작업</th>
+          </tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <!-- ------------------------------------------------ 3. 매핑 -->
   <section class="pp-panel" data-panel="mapping">
     <div class="pp-card">
       <div class="pp-card-head">
@@ -158,8 +196,6 @@
         <h2>가중치</h2>
         <h3>영역 가중치 (1.0 = 스펙 기본배점)</h3>
         <div class="pp-grid-4" id="cfg-area-weights"></div>
-        <h3>글로벌 권리범위 국가 가중치 (상한 7)</h3>
-        <div class="pp-grid-4" id="cfg-global-weights"></div>
         <h3>주요 시장 진입도 국가 가중치 (상한 8)</h3>
         <div class="pp-grid-4" id="cfg-market-weights"></div>
       </div>

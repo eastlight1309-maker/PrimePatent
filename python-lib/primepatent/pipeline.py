@@ -63,7 +63,8 @@ def run_analysis(headers: Sequence[str], rows: Sequence[Dict[str, Any]],
                  source_meta: Optional[Dict[str, Any]] = None,
                  progress: Optional[ProgressFn] = None,
                  cancel_event: Optional[threading.Event] = None,
-                 llm_cache: Optional[LLMCache] = None) -> Dict[str, Any]:
+                 llm_cache: Optional[LLMCache] = None,
+                 applicant_map: Optional[Dict[str, str]] = None) -> Dict[str, Any]:
     """전체 분석 실행. 결과 payload(dict)를 반환한다."""
     progress = progress or _noop_progress
     config = config or ScoringConfig()
@@ -87,7 +88,14 @@ def run_analysis(headers: Sequence[str], rows: Sequence[Dict[str, Any]],
 
     # ---------------------------------------------------------------- 2. 레코드
     progress("records", 0.12, "레코드 변환 중 (%d건)" % len(rows))
-    records = build_records(rows, mapping)
+    records = build_records(rows, mapping, applicant_map)
+    standardized = sum(1 for r in records if r.get("_applicantStandardized"))
+    if applicant_map:
+        warnings.append("승인된 출원인 표준화를 적용했습니다(%d개 표기 → 표준명, %d건 문헌 반영)."
+                        % (len(applicant_map), standardized))
+    else:
+        warnings.append("출원인 표준화가 승인되지 않아 원본 표기 그대로 분석했습니다. "
+                        "같은 회사가 여러 표기로 나뉘면 출원인 기준 점수가 낮게 나올 수 있습니다.")
     _check_cancel(cancel_event)
 
     as_of = to_date(config.as_of_date) or date.today()
@@ -139,7 +147,10 @@ def run_analysis(headers: Sequence[str], rows: Sequence[Dict[str, Any]],
                 warnings.append("LLM 분석 실패 %d건은 LLM 점수 0점으로 처리했습니다."
                                 % analyzer.stats["error"])
     else:
-        warnings.append("LLM 분석이 비활성화되어 정량점수(70점 구간)만 계산했습니다.")
+        from .config import COMPONENT_MAX, TOTAL_MAX, mixed_max
+        quant_total = sum(mixed_max(key)[0] for key in COMPONENT_MAX)
+        warnings.append("LLM 분석이 비활성화되어 정량점수(%g점 / 총 %g점)만 계산했습니다."
+                        % (quant_total, TOTAL_MAX))
 
     _check_cancel(cancel_event)
 
@@ -159,6 +170,11 @@ def run_analysis(headers: Sequence[str], rows: Sequence[Dict[str, Any]],
 
     payload = {
         "schemaVersion": 1,
+        "applicantStandardization": {
+            "approved": bool(applicant_map),
+            "mappedNameCount": len(applicant_map or {}),
+            "standardizedRecordCount": standardized,
+        },
         "generatedAt": datetime.now().isoformat(timespec="seconds"),
         "source": dict(source_meta or {}),
         "config": config.to_dict(),
@@ -246,9 +262,11 @@ def _count_by(rows: List[Dict[str, Any]], key: str) -> Dict[str, int]:
 
 def analyze_file(path: str, sheet: Optional[str] = None, user_mapping: Optional[Dict] = None,
                  config: Optional[ScoringConfig] = None, progress: Optional[ProgressFn] = None,
-                 cancel_event: Optional[threading.Event] = None) -> Dict[str, Any]:
+                 cancel_event: Optional[threading.Event] = None,
+                 applicant_map: Optional[Dict[str, str]] = None) -> Dict[str, Any]:
     """파일 경로로부터 전체 분석 실행(배치/테스트용)."""
     progress = progress or _noop_progress
     progress("load", 0.01, "파일 읽는 중")
     headers, rows, meta = load_table(path, sheet)
-    return run_analysis(headers, rows, user_mapping, config, meta, progress, cancel_event)
+    return run_analysis(headers, rows, user_mapping, config, meta, progress, cancel_event,
+                        applicant_map=applicant_map)

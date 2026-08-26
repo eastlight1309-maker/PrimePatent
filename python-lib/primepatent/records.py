@@ -8,9 +8,9 @@ import re
 from datetime import date
 from typing import Any, Dict, List, Optional, Sequence
 
-from .columns import BOOL, DATE, FIELD_BY_KEY, FLOAT, INT, LIST
+from .columns import BOOL, DATE, ENTITY_LIST, FIELD_BY_KEY, FLOAT, INT, LIST
 from .parsing import (countries_of, country_of, normalize_country, to_bool,
-                      to_date, to_float, to_int, to_list, to_text)
+                      to_date, to_entity_list, to_float, to_int, to_list, to_text)
 
 _CORP_SUFFIX_RE = re.compile(
     r"(주식회사|\(주\)|\(유\)|유한회사|co\.,?\s*ltd\.?|co\.\s*ltd|corporation|corp\.?|"
@@ -26,6 +26,8 @@ def _cast(value: Any, kind: str):
         return to_int(value)
     if kind == FLOAT:
         return to_float(value)
+    if kind == ENTITY_LIST:
+        return to_entity_list(value)
     if kind == LIST:
         return to_list(value)
     if kind == BOOL:
@@ -43,8 +45,13 @@ def normalize_entity_name(name: Any) -> str:
     return text[:60]
 
 
-def build_record(row: Dict[str, Any], mapping: Dict[str, Dict], row_index: int) -> Dict[str, Any]:
-    """한 행을 표준 레코드로 변환한다."""
+def build_record(row: Dict[str, Any], mapping: Dict[str, Dict], row_index: int,
+                 applicant_map: Optional[Dict[str, str]] = None) -> Dict[str, Any]:
+    """한 행을 표준 레코드로 변환한다.
+
+    applicant_map 은 사용자가 **승인한** 출원인 표준명({원본 표기: 표준명})이며,
+    승인 전에는 None 이 들어와 원본 표기를 그대로 사용한다.
+    """
     rec: Dict[str, Any] = {"_rowIndex": row_index}
     available: Dict[str, bool] = {}
 
@@ -58,12 +65,41 @@ def build_record(row: Dict[str, Any], mapping: Dict[str, Dict], row_index: int) 
         available[field_key] = not (value is None or value == "" or value == [])
 
     for spec in FIELD_BY_KEY.values():
-        rec.setdefault(spec.key, [] if spec.kind == LIST else None)
+        rec.setdefault(spec.key, [] if spec.kind in (LIST, ENTITY_LIST) else None)
         available.setdefault(spec.key, False)
 
     rec["_available"] = available
+    _apply_applicant_map(rec, applicant_map)
     _derive(rec)
     return rec
+
+
+def _apply_applicant_map(rec: Dict[str, Any], applicant_map: Optional[Dict[str, str]]) -> None:
+    """승인된 표준명으로 출원인·권리자 표기를 통일한다."""
+    if not applicant_map:
+        return
+    changed = []
+    for field_key in ("applicant", "currentAssignee"):
+        values = rec.get(field_key) or []
+        if not values:
+            continue
+        replaced = []
+        for name in values:
+            standard = applicant_map.get(name)
+            if standard and standard != name:
+                changed.append(name)
+            replaced.append(standard or name)
+        # 표준화 결과 중복이 생길 수 있으므로 순서를 유지하며 제거
+        seen = set()
+        rec[field_key] = [n for n in replaced if not (n in seen or seen.add(n))]
+    for field_key in ("applicantNormalized", "currentAssigneeNormalized"):
+        text = to_text(rec.get(field_key))
+        standard = applicant_map.get(text) if text else None
+        if standard:
+            rec[field_key] = standard
+    rec["_applicantStandardized"] = bool(changed)
+    if changed:
+        rec["_applicantOriginal"] = changed
 
 
 def _first_date(*values) -> Optional[date]:
@@ -217,13 +253,14 @@ def family_countries(rec: Dict[str, Any], source: str = "auto") -> List[str]:
     return countries
 
 
-def build_records(rows: Sequence[Dict[str, Any]], mapping: Dict[str, Dict]) -> List[Dict[str, Any]]:
+def build_records(rows: Sequence[Dict[str, Any]], mapping: Dict[str, Dict],
+                  applicant_map: Optional[Dict[str, str]] = None) -> List[Dict[str, Any]]:
     """행 목록을 레코드로 변환한다.
 
     동일 문헌번호가 중복된 파일에서 레코드 키가 겹치면 LLM 분석 결과가
     엉뚱한 문헌에 매칭될 수 있으므로, 중복 키에는 행 번호를 덧붙여 유일성을 보장한다.
     """
-    records = [build_record(row, mapping, i) for i, row in enumerate(rows)]
+    records = [build_record(row, mapping, i, applicant_map) for i, row in enumerate(rows)]
     seen: Dict[str, int] = {}
     for record in records:
         key = record["_key"]

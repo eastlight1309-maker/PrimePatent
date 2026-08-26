@@ -18,6 +18,7 @@ INT = "int"
 FLOAT = "float"
 DATE = "date"
 LIST = "list"
+ENTITY_LIST = "entity_list"   # 법인/개인 이름 목록(콤마 분리 주의)
 BOOL = "bool"
 
 
@@ -100,15 +101,15 @@ FIELDS: List[FieldSpec] = [
        ["Current IPC Main", "IPC Main", "Original IPC Main"], "분류"),
 
     # ---------- 인명 ----------
-    _f("applicant", "출원인", LIST, ["출원인"], "인명", important=True),
+    _f("applicant", "출원인", ENTITY_LIST, ["출원인"], "인명", important=True),
     _f("applicantNormalized", "출원인 대표명화 영문명", TEXT,
        ["출원인 대표명화 영문명", "출원인 대표명화 국문명", "출원인 대표명"], "인명", important=True),
     _f("applicantNormalizedCode", "출원인 대표명화 코드", TEXT, ["출원인 대표명화 코드"], "인명"),
     _f("applicantCountry", "출원인 국적", LIST, ["출원인 국적", "출원인 국가"], "인명"),
     _f("applicantCount", "출원인 수", INT, ["출원인 수"], "인명"),
-    _f("inventor", "발명자", LIST, ["발명자"], "인명"),
+    _f("inventor", "발명자", ENTITY_LIST, ["발명자"], "인명"),
     _f("inventorCount", "발명자 수", INT, ["발명자 수"], "인명"),
-    _f("currentAssignee", "현재권리자", LIST, ["현재권리자"], "인명"),
+    _f("currentAssignee", "현재권리자", ENTITY_LIST, ["현재권리자"], "인명"),
     _f("currentAssigneeNormalized", "현재권리자 대표명화 영문명", TEXT,
        ["현재권리자 대표명화 영문명", "현재권리자 대표명화 국문명", "현재권리자 대표명화 코드"], "인명"),
 

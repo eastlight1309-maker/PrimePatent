@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
-"""권리 중요도 30점 (스펙 4장).
+"""권리 중요도 (생존성 + 청구범위강도 + 잔존기간 + 권리유지·방어신호).
 
-생존성 8 + 청구범위강도 8(정량4+LLM4) + 글로벌권리범위 7 + 잔존기간 4 + 권리유지·방어신호 3
+배점은 config.COMPONENT_MAX 가 단일 기준이다.
 """
 
 from __future__ import annotations
@@ -20,7 +20,6 @@ def score(record: Dict[str, Any], analysis: Dict[str, Any], ctx: AnalysisContext
     components: List[Component] = [
         _survival(record),
         _claim_scope(record, analysis, ctx),
-        _global_scope(record, ctx),
         _remaining_term(record),
         _defense_signal(record),
     ]
@@ -72,26 +71,6 @@ def _claim_scope(record: Dict[str, Any], analysis: Dict[str, Any],
             "claimAnalysis": analysis.get("claimAnalysis") or {},
         },
         notes=notes)
-
-
-def _global_scope(record: Dict[str, Any], ctx: AnalysisContext) -> Component:
-    """고유 패밀리 국가에 가중치를 부여해 합산(상한 7점)."""
-    family = record.get("_family") or {}
-    countries = family.get("countries") or []
-    weights = ctx.config.global_country_weights
-    other = ctx.config.global_other_weight
-    breakdown = {}
-    total = 0.0
-    for country in countries:
-        weight = weights.get(country, other)
-        breakdown[country] = weight
-        total += weight
-    return make_component(
-        "rights.globalScope", "글로벌 권리범위", total,
-        detail={"countries": countries, "countryCount": len(countries),
-                "weightSum": round(total, 3), "weights": breakdown,
-                "familyMemberCount": family.get("memberCount")},
-        notes=[] if countries else ["패밀리 국가 정보가 없어 자국만 반영되었습니다."])
 
 
 def _remaining_term(record: Dict[str, Any]) -> Component:

@@ -97,7 +97,8 @@ class ApiFlowTest(unittest.TestCase):
         self.assertAlmostEqual(component_total, detail["totalScore"], places=1)
         self.assertAlmostEqual(detail["quantScore"] + detail["llmScore"],
                                detail["totalScore"], places=1)
-        self.assertAlmostEqual(detail["quantMax"] + detail["llmMax"], 100.0, places=1)
+        from primepatent.config import TOTAL_MAX
+        self.assertAlmostEqual(detail["quantMax"] + detail["llmMax"], TOTAL_MAX, places=1)
 
     def test_04_filters_and_paging(self):
         upload = self._upload()
@@ -161,6 +162,67 @@ class ApiFlowTest(unittest.TestCase):
 
         self.assertEqual(self.client.delete("/api/runs/%s" % meta["runId"]).status_code, 200)
         self.assertEqual(self.client.get("/api/runs").get_json()["runs"], [])
+
+    def test_055_applicant_standardization(self):
+        """승인 전에는 원본 표기, 승인 후에는 표준명이 반영되어야 한다."""
+        upload = self._upload()
+        self.assertFalse(upload["applicant"]["approved"])
+        self.assertFalse(upload["applicant"]["loaded"])
+
+        built = self.client.post("/api/upload/%s/applicants" % upload["uploadId"],
+                                 json={"mapping": upload["mapping"]})
+        self.assertEqual(built.status_code, 200, built.data[:300])
+        groups = built.get_json()["groups"]
+        self.assertTrue(groups)
+        self.assertTrue(any(g["variantCount"] >= 1 for g in groups))
+
+        # 승인 전 분석 → 표준화 미적용
+        job_id, _status = self._run_job(upload)
+        before = self.client.get("/api/jobs/%s/result?limit=500" % job_id).get_json()
+        self.assertTrue(any("승인되지 않아" in w for w in before["warnings"]))
+
+        # 표준명을 바꿔 승인
+        for group in groups:
+            group["standardName"] = "표준_" + group["standardName"]
+        approved = self.client.post("/api/upload/%s/applicants/approve" % upload["uploadId"],
+                                    json={"groups": groups})
+        self.assertEqual(approved.status_code, 200, approved.data[:300])
+        state = approved.get_json()["state"]
+        self.assertTrue(state["approved"])
+        self.assertTrue(state["approvedAt"])
+
+        job_id2, _ = self._run_job(upload)
+        after = self.client.get("/api/jobs/%s/result?limit=500" % job_id2).get_json()
+        self.assertTrue(any("표준화를 적용했습니다" in w for w in after["warnings"]))
+        self.assertTrue(all(str(row["applicant"]).startswith("표준_") for row in after["rows"]),
+                        sorted({row["applicant"] for row in after["rows"]})[:5])
+
+        # 승인 해제
+        reset = self.client.post("/api/upload/%s/applicants/reset" % upload["uploadId"]).get_json()
+        self.assertFalse(reset["state"]["approved"])
+
+    def test_056_applicant_validation(self):
+        upload = self._upload()
+        self.client.post("/api/upload/%s/applicants" % upload["uploadId"],
+                         json={"mapping": upload["mapping"]})
+        empty = self.client.post("/api/upload/%s/applicants/approve" % upload["uploadId"],
+                                 json={"groups": []})
+        self.assertEqual(empty.status_code, 400)
+        blank = self.client.post("/api/upload/%s/applicants/approve" % upload["uploadId"],
+                                 json={"groups": [{"groupId": "g0", "standardName": "  ",
+                                                   "variants": [{"raw": "A", "count": 1}]}]})
+        self.assertEqual(blank.status_code, 400)
+        self.assertIn("표준명", blank.get_json()["error"])
+
+        # 출원인 컬럼을 비우면 안내 메시지
+        no_applicant = {k: v for k, v in upload["mapping"].items()
+                        if k not in ("applicant", "applicantNormalized")}
+        no_applicant["applicant"] = "__none__"
+        no_applicant["applicantNormalized"] = "__none__"
+        response = self.client.post("/api/upload/%s/applicants" % upload["uploadId"],
+                                    json={"mapping": no_applicant})
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("출원인", response.get_json()["error"])
 
     def test_06_error_paths(self):
         self.assertEqual(self.client.post("/api/upload", data={}).status_code, 400)

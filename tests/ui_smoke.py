@@ -24,7 +24,14 @@ def main():
 
         # 업로드
         page.set_input_files("#pp-file", SAMPLE)
-        page.wait_for_selector('.pp-panel[data-panel="mapping"].pp-panel-active', timeout=60000)
+        page.wait_for_selector('.pp-panel[data-panel="applicant"].pp-panel-active', timeout=60000)
+        page.wait_for_selector("#pp-app-table tbody tr", timeout=30000)
+        page.wait_for_timeout(500)
+        print("2-1) 출원인 표준화:", " ".join(page.text_content("#pp-app-summary").split()))
+        page.click("#pp-app-approve")
+        page.wait_for_timeout(1200)
+        print("     승인:", " ".join(page.text_content("#pp-toast").split())[:40])
+        page.click('.pp-tab[data-tab="mapping"]')
         page.wait_for_selector("#pp-map-table tbody tr", timeout=20000)
         print("2) 업로드:", page.text_content("#pp-file-name"), "|", page.text_content("#pp-toast"))
         print("   매핑 상태:", page.text_content("#pp-map-status")[:140])

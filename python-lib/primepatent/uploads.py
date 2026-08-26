@@ -45,6 +45,11 @@ class UploadSession:
         self.meta: Dict[str, Any] = {}
         self.mapping: Dict[str, Dict] = {}
         self.report: Dict[str, Any] = {}
+        # 출원인 표준화: 승인 전에는 approved=False 이며 분석에 반영되지 않는다.
+        self.applicant_groups: List[Dict[str, Any]] = []
+        self.applicant_map: Dict[str, str] = {}
+        self.applicant_approved = False
+        self.applicant_approved_at: Optional[str] = None
         self.created_at = time.time()
 
     def to_dict(self) -> Dict[str, Any]:
@@ -52,7 +57,19 @@ class UploadSession:
             "uploadId": self.id, "fileName": self.file_name, "sheet": self.sheet,
             "sheets": self.sheets, "headers": self.headers, "preview": self.preview,
             "meta": self.meta, "mapping": self.mapping, "mappingReport": self.report,
+            "applicant": self.applicant_state(),
         }
+
+    def applicant_state(self) -> Dict[str, Any]:
+        from .applicants import summarize
+        state = summarize(self.applicant_groups)
+        state.update({
+            "approved": self.applicant_approved,
+            "approvedAt": self.applicant_approved_at,
+            "mappedNameCount": len(self.applicant_map),
+            "loaded": bool(self.applicant_groups),
+        })
+        return state
 
 
 class UploadStore:
@@ -113,6 +130,11 @@ class UploadStore:
             {k: _preview_value(v) for k, v in row.items()} for row in rows[:PREVIEW_ROWS]]
         session.mapping = auto_map(headers)
         session.report = mapping_report(headers, session.mapping)
+        # 데이터가 바뀌었으므로 이전 표준화 승인은 무효화한다.
+        session.applicant_groups = []
+        session.applicant_map = {}
+        session.applicant_approved = False
+        session.applicant_approved_at = None
         if meta.get("truncated"):
             session.report.setdefault("warnings", []).append(
                 "행 수가 %d 건을 초과하여 앞부분만 사용합니다." % MAX_ROWS)

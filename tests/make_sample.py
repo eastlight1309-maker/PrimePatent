@@ -26,11 +26,18 @@ HEADERS = [
     "상세보기 링크(비로그인)",
 ]
 
+# 실제 WIPS 데이터처럼 같은 회사가 여러 표기로 등장하도록 구성한다
+# (출원인 표준화 단계를 실제로 검증하기 위함)
 APPLICANTS = [
     ("삼성전자(주)", "SAMSUNG ELECTRONICS", "KR"),
+    ("삼성전자 주식회사", "SAMSUNG ELECTRONICS", "KR"),
+    ("SAMSUNG ELECTRONICS CO., LTD.", "SAMSUNG ELECTRONICS", "KR"),
     ("에스케이하이닉스 주식회사", "SK HYNIX", "KR"),
+    ("에스케이하이닉스(주)", "SK HYNIX", "KR"),
     ("TAIWAN SEMICONDUCTOR MANUFACTURING CO., LTD.", "TSMC", "TW"),
+    ("TAIWAN SEMICONDUCTOR MANUFACTURING COMPANY LIMITED", "TSMC", "TW"),
     ("INTEL CORPORATION", "INTEL", "US"),
+    ("INTEL CORP.", "INTEL", "US"),
     ("MICRON TECHNOLOGY, INC.", "MICRON", "US"),
     ("주식회사 에이피솔루션", "AP SOLUTION", "KR"),
 ]

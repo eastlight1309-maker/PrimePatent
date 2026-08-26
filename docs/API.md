@@ -12,6 +12,9 @@
 | POST | `/api/upload` | 파일 업로드(multipart `file`) → 헤더·미리보기·자동매핑 |
 | POST | `/api/upload/<id>/sheet` | 시트 변경 후 재적재 |
 | POST | `/api/upload/<id>/mapping` | 매핑 검증(사용자 수정 반영 결과 반환) |
+| POST | `/api/upload/<id>/applicants` | 출원인 표기를 모아 표준화 후보 그룹 생성 |
+| POST | `/api/upload/<id>/applicants/approve` | 표준명 승인 (승인 후에만 분석에 반영) |
+| POST | `/api/upload/<id>/applicants/reset` | 승인 해제 |
 | DELETE | `/api/upload/<id>` | 업로드 세션 삭제 |
 | POST | `/api/analyze` | 분석 실행(백그라운드) → `job` |
 | GET | `/api/jobs/<id>` | 작업 상태·진행률 |
