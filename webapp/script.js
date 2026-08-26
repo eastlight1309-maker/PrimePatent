@@ -1073,16 +1073,40 @@
         ", LLM " + num(row.llmScore, 2) + "/" + num(row.llmMax, 0) + ")");
       body.appendChild(totals);
 
-      Object.keys(row.areas || {}).forEach(function (areaKey) {
+      // JSON 키 정렬 때문에 알파벳순(impact→market→rights→tech)이 되므로
+      // 화면 전체와 같은 논리 순서(권리→기술→시장→영향력)로 고정한다.
+      var AREA_ORDER = ["rights", "tech", "market", "impact"];
+      var areaKeys = AREA_ORDER.filter(function (key) { return (row.areas || {})[key]; })
+        .concat(Object.keys(row.areas || {}).filter(function (key) {
+          return AREA_ORDER.indexOf(key) < 0;
+        }));
+      areaKeys.forEach(function (areaKey) {
         var area = row.areas[areaKey];
         body.appendChild(el("h3", null, area.label + "  " + num(area.weightedScore, 2) + " / " + num(area.weightedMax, 0)));
         area.components.forEach(function (component) {
           var box = el("div", "pp-comp");
           var head = el("div", "pp-comp-head");
-          head.appendChild(el("span", null, component.label));
+          var title = el("span");
+          title.appendChild(document.createTextNode(component.label + " "));
+          title.appendChild(el("span", "pp-src pp-src-" + component.source,
+            component.source === "llm" ? "LLM"
+              : (component.source === "mixed" ? "정량+LLM" : "정량")));
+          head.appendChild(title);
           head.appendChild(el("span", "pp-comp-score",
             num(component.score, 2) + " / " + num(component.max, 0)));
           box.appendChild(head);
+          // 정량+LLM 혼합 지표는 어느 쪽에서 몇 점이 나왔는지 분해해 보여 준다.
+          if (component.source === "mixed") {
+            var split = el("div", "pp-comp-split");
+            var quant = el("span", "pp-split-chip pp-src-quant");
+            quant.textContent = "정량 " + num(component.quantScore, 2) + " / " + num(component.quantMax, 0);
+            var llm = el("span", "pp-split-chip pp-src-llm");
+            llm.textContent = "LLM " + num(component.llmScore, 2) + " / " + num(component.llmMax, 0);
+            split.appendChild(quant);
+            split.appendChild(document.createTextNode("+"));
+            split.appendChild(llm);
+            box.appendChild(split);
+          }
           var track = el("div", "pp-bar-track");
           var fill = el("div", "pp-bar-fill");
           fill.style.width = (component.max ? (component.score / component.max * 100) : 0) + "%";

@@ -82,6 +82,24 @@ COMPONENT_SOURCE = {
     "impact.conflict": "quant",
 }
 
+# mixed(정량+LLM) 세부지표의 배점 분해 (정량 상한, LLM 상한)
+COMPONENT_MIXED_SPLIT = {
+    "rights.claimScope": (4.0, 4.0),     # 정량: 청구항/독립항 백분위, LLM: 권리범위 넓이
+    "tech.generality": (1.0, 3.0),       # 정량: CPC 서브그룹 백분위, LLM: 범용성 판단
+}
+
+
+def mixed_max(component_key):
+    """세부지표의 (정량 상한, LLM 상한)."""
+    maximum = COMPONENT_MAX[component_key]
+    source = COMPONENT_SOURCE.get(component_key, "quant")
+    if source == "quant":
+        return maximum, 0.0
+    if source == "llm":
+        return 0.0, maximum
+    return COMPONENT_MIXED_SPLIT.get(component_key, (maximum / 2.0, maximum / 2.0))
+
+
 # 4.3 글로벌 권리범위 - 국가 가중치 (합계 상한 7점)
 DEFAULT_GLOBAL_COUNTRY_WEIGHTS = {
     "US": 1.5, "CN": 1.3, "EP": 1.2, "JP": 1.2, "KR": 1.0, "TW": 1.0,

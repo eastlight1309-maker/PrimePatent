@@ -260,6 +260,37 @@ class TotalsTest(unittest.TestCase):
         self.assertAlmostEqual(result["quantMax"] + result["llmMax"], 100.0, places=6)
         self.assertLessEqual(result["totalScore"], 100.0)
 
+    def test_every_component_reports_quant_and_llm_maxima(self):
+        """세부지표마다 정량/LLM 배점 상한이 노출되고 합이 배점과 같아야 한다."""
+        from primepatent.config import mixed_max
+        record = make_record()
+        ctx, _ = prepare([record])
+        result = score_one(record, analysis_defaults(status="ok"), ctx)
+        for area in result["areas"].values():
+            for component in area["components"]:
+                expected = mixed_max(component["key"])
+                self.assertAlmostEqual(component["quantMax"], expected[0], places=6,
+                                       msg=component["key"])
+                self.assertAlmostEqual(component["llmMax"], expected[1], places=6,
+                                       msg=component["key"])
+                self.assertAlmostEqual(component["quantMax"] + component["llmMax"],
+                                       component["max"], places=6, msg=component["key"])
+
+    def test_claim_scope_exposes_llm_raw_score(self):
+        """LLM 이 매긴 권리범위 넓이(0~4)가 상세에 그대로 남아야 한다."""
+        record = make_record()
+        ctx, _ = prepare([record])
+        analysis = analysis_defaults(status="ok")
+        analysis["claimBreadthScore"] = 2.0
+        component = component_of(score_one(record, analysis, ctx), "rights.claimScope")
+        self.assertEqual(component["detail"]["claimBreadthScore"], 2.0)
+        self.assertEqual(component["llmScore"], 2.0)
+        self.assertEqual(component["llmMax"], 4.0)
+        self.assertEqual(component["quantMax"], 4.0)
+        # 총점 = 정량 + LLM
+        self.assertAlmostEqual(component["score"],
+                               component["quantScore"] + component["llmScore"], places=6)
+
     def test_quant_llm_split_is_70_30(self):
         record = make_record()
         ctx, _ = prepare([record])

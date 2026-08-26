@@ -65,6 +65,7 @@ def _claim_scope(record: Dict[str, Any], analysis: Dict[str, Any],
             "claimCount": record.get("claimCount"),
             "independentRank": round(ind_rank, 3), "independentPeer": ind_group, "independentPeerN": ind_n,
             "claimRank": round(claim_rank, 3), "claimPeer": claim_group, "claimPeerN": claim_n,
+            "claimBreadthScore": round(llm_score, 2),      # LLM 이 매긴 권리범위 넓이 0~4
             # 백분위만으로는 '이 값이 집단에서 어느 수준인지' 알 수 없으므로 분포를 함께 제공
             "claimPeerStats": ctx.peer_stats("claimCount", record),
             "independentPeerStats": ctx.peer_stats("independentClaimCount", record),

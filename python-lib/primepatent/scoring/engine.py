@@ -10,7 +10,7 @@ from __future__ import annotations
 from datetime import date
 from typing import Any, Dict, List, Optional, Sequence
 
-from ..config import AREA_MAX, COMPONENT_MAX, ScoringConfig
+from ..config import AREA_MAX, ScoringConfig, mixed_max
 from ..llm.analyzer import analysis_defaults
 from . import impact, market, rights, tech
 from .common import AreaResult
@@ -67,7 +67,7 @@ def score_one(record: Dict[str, Any], analysis: Optional[Dict[str, Any]],
                 quant += q * weight
                 llm += l * weight
                 # mixed 배점 분해: 정량/LLM 상한은 스펙 고정값
-                q_max, l_max = _mixed_max(component.key)
+                q_max, l_max = mixed_max(component.key)
                 quant_max += q_max * weight
                 llm_max += l_max * weight
 
@@ -163,16 +163,6 @@ def jsonable(value: Any) -> Any:
     if hasattr(value, "isoformat"):
         return value.isoformat()[:10] if isinstance(value, date) else value.isoformat()
     return value
-
-
-def _mixed_max(component_key: str):
-    """mixed 세부지표의 (정량 상한, LLM 상한)."""
-    if component_key == "rights.claimScope":
-        return 4.0, 4.0
-    if component_key == "tech.generality":
-        return tech.GENERALITY_CPC_MAX, COMPONENT_MAX[component_key] - tech.GENERALITY_CPC_MAX
-    half = COMPONENT_MAX[component_key] / 2.0
-    return half, half
 
 
 def score_records(records: Sequence[Dict[str, Any]], analyses: Dict[str, Dict[str, Any]],

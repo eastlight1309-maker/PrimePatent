@@ -8,14 +8,16 @@ from __future__ import annotations
 
 from typing import Any, Dict, List
 
+from ..config import mixed_max
 from .common import AreaResult, Component, make_component
 from .context import AnalysisContext
 
 LABEL = "기술 중요도"
 
 # 5.4 기술 범용성: LLM 0~4 → 3점 환산 + CPC 백분위 1점 (합계 상한 4)
-GENERALITY_LLM_WEIGHT = 0.75
-GENERALITY_CPC_MAX = 1.0
+# 배점 분해는 config.COMPONENT_MIXED_SPLIT 이 단일 기준이다.
+GENERALITY_CPC_MAX, _GENERALITY_LLM_MAX = mixed_max("tech.generality")
+GENERALITY_LLM_WEIGHT = _GENERALITY_LLM_MAX / 4.0        # LLM 0~4 → LLM 상한으로 환산
 
 
 def score(record: Dict[str, Any], analysis: Dict[str, Any], ctx: AnalysisContext) -> AreaResult:

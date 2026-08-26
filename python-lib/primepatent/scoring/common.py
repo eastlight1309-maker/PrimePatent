@@ -6,7 +6,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
-from ..config import COMPONENT_MAX, COMPONENT_SOURCE
+from ..config import COMPONENT_MAX, COMPONENT_SOURCE, mixed_max
 
 
 @dataclass
@@ -20,6 +20,8 @@ class Component:
     source: str = "quant"                  # quant | llm | mixed
     quant_score: Optional[float] = None    # mixed 인 경우 정량 부분
     llm_score: Optional[float] = None      # mixed 인 경우 LLM 부분
+    quant_max: float = 0.0                 # 정량 배점 상한
+    llm_max: float = 0.0                   # LLM 배점 상한
     detail: Dict[str, Any] = field(default_factory=dict)
     notes: List[str] = field(default_factory=list)
 
@@ -30,6 +32,8 @@ class Component:
             "source": self.source,
             "quantScore": None if self.quant_score is None else round(float(self.quant_score), 3),
             "llmScore": None if self.llm_score is None else round(float(self.llm_score), 3),
+            "quantMax": round(float(self.quant_max), 3),
+            "llmMax": round(float(self.llm_max), 3),
             "detail": self.detail, "notes": self.notes,
         }
 
@@ -64,10 +68,12 @@ def make_component(key: str, label: str, score: float, detail: Optional[Dict] = 
     """COMPONENT_MAX 에 정의된 배점으로 상한을 강제한다."""
     maximum = COMPONENT_MAX[key]
     bounded = max(0.0, min(float(maximum), float(score or 0.0)))
+    quant_max, llm_max = mixed_max(key)
     return Component(
         key=key, label=label, score=bounded, max=maximum,
         source=COMPONENT_SOURCE.get(key, "quant"),
         quant_score=quant_score, llm_score=llm_score,
+        quant_max=quant_max, llm_max=llm_max,
         detail=detail or {}, notes=notes or [],
     )
 

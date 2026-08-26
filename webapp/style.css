@@ -176,6 +176,11 @@ textarea.pp-input { resize: vertical; width: 100%; }
 .pp-comp-score { font-variant-numeric: tabular-nums; }
 .pp-comp-detail { font-size: 11px; color: var(--pp-muted); margin-top: 4px; word-break: break-all; }
 .pp-comp-note { font-size: 11px; color: var(--pp-warn); margin-top: 3px; }
+.pp-comp-split { display: flex; align-items: center; gap: 6px; margin: 5px 0 2px;
+                 font-size: 11px; color: var(--pp-muted); }
+.pp-split-chip { padding: 2px 8px; border-radius: 10px; font-weight: 600;
+                 font-variant-numeric: tabular-nums; }
+
 .pp-peer-stats { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 6px;
                  padding: 5px 8px; background: #f6f8fa; border: 1px solid var(--pp-border);
                  border-radius: 4px; font-size: 11px; }

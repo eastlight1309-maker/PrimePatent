@@ -12,8 +12,8 @@ from typing import Any, Dict, List
 from .columns import FIELDS
 from .config import (COMPONENT_MAX, COMPONENT_SOURCE, DEFAULT_GLOBAL_COUNTRY_WEIGHTS,
                      DEFAULT_GLOBAL_OTHER_WEIGHT, DEFAULT_MARKET_COUNTRY_WEIGHTS,
-                     REMAINING_TERM_BANDS, SURVIVAL_SCORES, ScoringConfig)
-from .scoring.engine import GRADE_BANDS, _mixed_max
+                     REMAINING_TERM_BANDS, SURVIVAL_SCORES, ScoringConfig, mixed_max)
+from .scoring.engine import GRADE_BANDS
 from .status import STATUS_LABEL
 
 SOURCE_LABEL = {"quant": "정량", "llm": "LLM", "mixed": "정량+LLM"}
@@ -273,7 +273,7 @@ def build_guide(config: ScoringConfig = None) -> Dict[str, Any]:
             elif source == "llm":
                 quant_part, llm_part = 0.0, maximum
             else:
-                quant_part, llm_part = _mixed_max(component_key)
+                quant_part, llm_part = mixed_max(component_key)
             quant_total += quant_part
             llm_total += llm_part
 
