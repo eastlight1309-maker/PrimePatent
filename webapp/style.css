@@ -176,6 +176,14 @@ textarea.pp-input { resize: vertical; width: 100%; }
 .pp-comp-score { font-variant-numeric: tabular-nums; }
 .pp-comp-detail { font-size: 11px; color: var(--pp-muted); margin-top: 4px; word-break: break-all; }
 .pp-comp-note { font-size: 11px; color: var(--pp-warn); margin-top: 3px; }
+.pp-peer-stats { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 6px;
+                 padding: 5px 8px; background: #f6f8fa; border: 1px solid var(--pp-border);
+                 border-radius: 4px; font-size: 11px; }
+.pp-peer-stats > b { color: var(--pp-muted); font-weight: 600; }
+.pp-peer-cell { display: inline-flex; gap: 4px; align-items: baseline; }
+.pp-peer-key { color: var(--pp-muted); }
+.pp-peer-val { font-weight: 700; font-variant-numeric: tabular-nums; }
+.pp-peer-n { margin-left: auto; color: var(--pp-muted); }
 
 .pp-toast { position: fixed; top: 16px; right: 16px; z-index: 200; padding: 10px 16px;
             border-radius: 5px; font-size: 12px; box-shadow: 0 3px 12px rgba(0,0,0,.16);

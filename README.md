@@ -122,7 +122,9 @@ python tests/make_sample.py tmp/wips_sample.xlsx 120   # 테스트용 모사 데
    (화면의 매핑 상태가 그대로 실행됩니다. 미매핑 주요 항목은 관련 점수가 0점 처리되고 경고로 표시)
 3. **분석 설정** — 주제(Primary Topic)·키워드, LLM 모델, Gate 기준, 비교집단, 국가 가중치
 4. **실행** — 백그라운드 작업으로 실행되며 진행률 표시·취소 가능
-5. **결과** — 요약/분포/정렬/필터/상세(세부지표 18종 근거) 확인, 엑셀·CSV 다운로드
+5. **결과** — 요약/분포/정렬/필터/상세 확인, 엑셀·CSV 다운로드.
+   상세에는 세부지표 18종의 점수·산출근거와 함께 **비교집단 분포(최소·25%·중앙·75%·최대·평균)** 가
+   표시되어, 백분위가 실제로 어느 수준인지 바로 확인할 수 있습니다.
 6. **저장소** — 부서·이름·프로젝트명 입력 후 저장(저장 시각 자동 기록), 이후 재조회·다운로드·삭제
 7. **설명** — 앱 상단 오른쪽 `? 설명` 탭에서 총점 구성, 세부지표 18종의 계산식과 사용 데이터,
    공통 규칙(패밀리 대표문헌·비교집단·Gate), 등급·검토 루트, 입력 항목 목록을 확인할 수 있습니다.
@@ -146,7 +148,7 @@ python tests/make_sample.py tmp/wips_sample.xlsx 120   # 테스트용 모사 데
 ## 6. 테스트
 
 ```bash
-python -m unittest discover -s tests -p "test_*.py" -v   # 단위 + 통합 + DSS 기동 + 회귀 (93건)
+python -m unittest discover -s tests -p "test_*.py" -v   # 단위 + 통합 + DSS 기동 + 회귀 (99건)
 python tests/ui_smoke.py                                 # 브라우저 UI 스모크(Playwright, 서버 실행 필요)
 python tools/build_backend_bundle.py --check             # 번들이 소스와 동기화됐는지 확인
 ```

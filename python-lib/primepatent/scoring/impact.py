@@ -28,6 +28,24 @@ def score(record: Dict[str, Any], analysis: Dict[str, Any], ctx: AnalysisContext
     return AreaResult(key="impact", label=LABEL, components=components)
 
 
+def _raw_citation_stats(record: Dict[str, Any], ctx: AnalysisContext):
+    """피인용 비교집단 분포를 원값(건수) 기준으로 환산해 돌려준다.
+
+    내부 백분위는 LN(1+x) 로 계산하지만, 화면에는 사람이 읽을 수 있는 건수로 보여야 한다.
+    """
+    import math as _math
+    stats = ctx.peer_stats("logForward", record)
+    if not stats:
+        return None
+    converted = dict(stats)
+    for key in ("min", "p25", "median", "p75", "max", "mean"):
+        if converted.get(key) is not None:
+            raw = _math.expm1(float(converted[key]))
+            converted[key] = int(round(raw)) if abs(raw - round(raw)) < 0.01 else round(raw, 1)
+    converted["unit"] = "피인용 건수(로그 역변환)"
+    return converted
+
+
 def _citation(record: Dict[str, Any], ctx: AnalysisContext) -> Component:
     """LN(1+피인용) 의 동일주제·동일우선연도 백분위 × 8.
 
@@ -50,7 +68,9 @@ def _citation(record: Dict[str, Any], ctx: AnalysisContext) -> Component:
                 "citationSpeed": None if ctx.citation_speed(record) is None
                 else round(ctx.citation_speed(record), 3),
                 "method": method, "rank": round(rank, 3),
-                "peerGroup": group, "peerN": size},
+                "peerGroup": group, "peerN": size,
+                # 로그 변환 전 원값 기준 분포(해석용)
+                "peerStats": _raw_citation_stats(record, ctx)},
         notes=notes)
 
 
@@ -72,7 +92,8 @@ def _diffusion(record: Dict[str, Any], ctx: AnalysisContext) -> Component:
         detail={"forwardCitations": forward, "otherForwardCitations": other,
                 "nonSelfRatio": round(ratio, 3),
                 "uniqueCitingApplicants": unique_applicants,
-                "rank": round(rank, 3), "peerGroup": group, "peerN": size},
+                "rank": round(rank, 3), "peerGroup": group, "peerN": size,
+                "peerStats": ctx.peer_stats("uniqueCitingApplicants", record)},
         notes=notes)
 
 

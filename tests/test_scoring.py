@@ -323,6 +323,81 @@ class FamilyTest(unittest.TestCase):
         self.assertEqual(len(representative_records(records, {}, False)), 2)
 
 
+class PeerStatsTest(unittest.TestCase):
+    """비교집단 분포 요약(백분위 해석용)."""
+
+    def _index(self):
+        from primepatent.peers import PeerIndex
+        index = PeerIndex(min_size=5, year_window=1)
+        for value in [3, 6, 8, 10, 12, 15, 18, 20, 25, 40]:
+            index.add("T", 2020, value)
+        return index
+
+    def test_quantiles_match_excel_percentile_inc(self):
+        from primepatent.peers import _quantile
+        values = [3, 6, 8, 10, 12, 15, 18, 20, 25, 40]
+        # 엑셀 =PERCENTILE.INC({...}, q) 와 동일해야 한다
+        self.assertAlmostEqual(_quantile(values, 0.0), 3)
+        self.assertAlmostEqual(_quantile(values, 0.25), 8.5)
+        self.assertAlmostEqual(_quantile(values, 0.5), 13.5)
+        self.assertAlmostEqual(_quantile(values, 0.75), 19.5)
+        self.assertAlmostEqual(_quantile(values, 1.0), 40)
+
+    def test_stats_describe_the_group_actually_used(self):
+        index = self._index()
+        _rank, group, size = index.rank("T", 2020, 12)
+        stats = index.stats("T", 2020)
+        self.assertEqual(stats["peerGroup"], group)
+        self.assertEqual(stats["n"], size)
+        self.assertEqual(stats["min"], 3)
+        self.assertEqual(stats["max"], 40)
+        self.assertEqual(stats["median"], 13.5)
+
+    def test_stats_follow_fallback(self):
+        from primepatent.peers import PeerIndex
+        index = PeerIndex(min_size=5, year_window=1)
+        for value in [1, 2]:
+            index.add("T", 2019, value)
+        for value in [10, 20, 30, 40]:
+            index.add("T", 2020, value)
+        # 2019 단독은 2건 → ±1년(6건) 으로 확장되어야 한다
+        stats = index.stats("T", 2019)
+        self.assertEqual(stats["peerGroup"], "topic+year±1")
+        self.assertEqual(stats["n"], 6)
+        self.assertEqual(stats["max"], 40)
+
+    def test_empty_index_returns_none(self):
+        from primepatent.peers import PeerIndex
+        self.assertIsNone(PeerIndex().stats("T", 2020))
+
+    def test_claim_scope_detail_exposes_distribution(self):
+        records = [make_record(**{"출원번호": "KR%02d" % i, "WIPS패밀리 ID": "F%02d" % i,
+                                  "청구항 수": count, "독립항 수": 1 + i % 3})
+                   for i, count in enumerate([5, 9, 13, 21, 30])]
+        ctx, _ = prepare(records, ScoringConfig(peer_min_size=3))
+        result = score_one(records[2], None, ctx)
+        detail = component_of(result, "rights.claimScope")["detail"]
+        stats = detail["claimPeerStats"]
+        self.assertEqual(stats["n"], 5)
+        self.assertEqual(stats["min"], 5)
+        self.assertEqual(stats["max"], 30)
+        self.assertEqual(stats["median"], 13)
+        self.assertEqual(detail["claimPeerN"], stats["n"])
+        self.assertIn("independentPeerStats", detail)
+
+    def test_citation_distribution_is_reported_in_raw_counts(self):
+        """내부 계산은 LN(1+x) 이지만 화면 표시는 건수여야 한다."""
+        records = [make_record(**{"출원번호": "KR%02d" % i, "WIPS패밀리 ID": "F%02d" % i,
+                                  "피인용 문헌 수(F1)": count})
+                   for i, count in enumerate([0, 2, 10, 50, 100])]
+        ctx, _ = prepare(records, ScoringConfig(peer_min_size=3))
+        detail = component_of(score_one(records[2], None, ctx), "impact.citation")["detail"]
+        stats = detail["peerStats"]
+        self.assertEqual(stats["min"], 0)
+        self.assertEqual(stats["max"], 100)      # 로그값(4.6)이 아니라 건수
+        self.assertIn("건수", stats["unit"])
+
+
 class DuplicateKeyTest(unittest.TestCase):
     def test_duplicate_doc_numbers_get_unique_keys(self):
         from primepatent.records import build_records

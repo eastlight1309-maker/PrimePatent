@@ -186,3 +186,7 @@ class AnalysisContext:
     # ------------------------------------------------------------------ rank
     def rank(self, metric: str, record: Dict[str, Any], value: Optional[float]):
         return self.peers.rank(metric, self.topic_of(record), self.year_of(record), value)
+
+    def peer_stats(self, metric: str, record: Dict[str, Any]):
+        """해당 문헌에 적용된 비교집단의 분포 요약(최소·사분위·중앙·최대)."""
+        return self.peers.stats(metric, self.topic_of(record), self.year_of(record))

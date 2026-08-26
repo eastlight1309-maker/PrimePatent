@@ -12,7 +12,26 @@ from __future__ import annotations
 
 import bisect
 import math
-from typing import Callable, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
+
+
+def _quantile(sorted_values: Sequence[float], q: float) -> float:
+    """선형보간 분위수(엑셀 PERCENTILE.INC 와 동일한 정의)."""
+    n = len(sorted_values)
+    if n == 0:
+        return 0.0
+    if n == 1:
+        return float(sorted_values[0])
+    position = (n - 1) * q
+    lower = int(math.floor(position))
+    upper = min(lower + 1, n - 1)
+    weight = position - lower
+    return float(sorted_values[lower]) * (1 - weight) + float(sorted_values[upper]) * weight
+
+
+def _round(value: float) -> float:
+    number = round(float(value), 3)
+    return int(number) if number == int(number) else number
 
 
 def percent_rank_inc(sorted_values: Sequence[float], value: float) -> float:
@@ -71,6 +90,26 @@ class PeerIndex:
         merged.sort()
         return merged
 
+    def select(self, topic: str, year: Optional[int]) -> Tuple[List[float], str]:
+        """백분위 계산에 사용할 비교집단 값과 라벨을 고른다(4단계 폴백)."""
+        self.finalize()
+        exact = self._by_topic_year.get((topic, year), [])
+        if len(exact) >= self.min_size:
+            return exact, "topic+year"
+
+        window = self._window_values(topic, year)
+        if len(window) >= self.min_size:
+            return window, "topic+year±%d" % self.year_window
+
+        topic_values = self._by_topic.get(topic, [])
+        if len(topic_values) >= self.min_size:
+            return topic_values, "topic"
+
+        if len(self._all) >= 2:
+            return self._all, "all"
+
+        return self._all, "insufficient"
+
     def rank(self, topic: str, year: Optional[int], value: Optional[float]) -> Tuple[float, str, int]:
         """(백분위, 사용된 비교집단, 표본수). 값이 없으면 (0.0, 'none', 0)."""
         self.finalize()
@@ -83,23 +122,31 @@ class PeerIndex:
         if math.isnan(number):
             return 0.0, "none", 0
 
-        exact = self._by_topic_year.get((topic, year), [])
-        if len(exact) >= self.min_size:
-            return percent_rank_inc(exact, number), "topic+year", len(exact)
+        values, label = self.select(topic, year)
+        if label == "insufficient":
+            # 표본이 절대적으로 부족 → 중립값
+            return 0.5, "insufficient", len(values)
+        return percent_rank_inc(values, number), label, len(values)
 
-        window = self._window_values(topic, year)
-        if len(window) >= self.min_size:
-            return percent_rank_inc(window, number), "topic+year±%d" % self.year_window, len(window)
+    def stats(self, topic: str, year: Optional[int]) -> Optional[Dict[str, Any]]:
+        """비교집단의 분포 요약.
 
-        topic_values = self._by_topic.get(topic, [])
-        if len(topic_values) >= self.min_size:
-            return percent_rank_inc(topic_values, number), "topic", len(topic_values)
-
-        if len(self._all) >= 2:
-            return percent_rank_inc(self._all, number), "all", len(self._all)
-
-        # 표본이 절대적으로 부족 → 중립값
-        return 0.5, "insufficient", len(self._all)
+        백분위만 보면 '이 값이 집단에서 실제로 어느 수준인지' 알 수 없으므로
+        최소·사분위·중앙·최대를 함께 제공한다.
+        """
+        values, label = self.select(topic, year)
+        if not values:
+            return None
+        return {
+            "peerGroup": label,
+            "n": len(values),
+            "min": _round(values[0]),
+            "p25": _round(_quantile(values, 0.25)),
+            "median": _round(_quantile(values, 0.5)),
+            "p75": _round(_quantile(values, 0.75)),
+            "max": _round(values[-1]),
+            "mean": _round(sum(values) / len(values)),
+        }
 
 
 class PeerSet:
@@ -121,6 +168,9 @@ class PeerSet:
     def rank(self, metric: str, topic: str, year: Optional[int],
              value: Optional[float]) -> Tuple[float, str, int]:
         return self.index(metric).rank(topic, year, value)
+
+    def stats(self, metric: str, topic: str, year: Optional[int]) -> Optional[Dict[str, Any]]:
+        return self.index(metric).stats(topic, year)
 
     def build(self, records: Sequence[Dict], metrics: Dict[str, Callable[[Dict], Optional[float]]],
               topic_of: Callable[[Dict], str], year_of: Callable[[Dict], Optional[int]]) -> "PeerSet":

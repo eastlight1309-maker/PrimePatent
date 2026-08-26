@@ -117,5 +117,6 @@ def _competitor_coverage(record: Dict[str, Any], ctx: AnalysisContext) -> Compon
         "market.competitorCoverage", "경쟁사 커버리지", rank * 3.0,
         detail={"uniqueCitingApplicants": value_raw, "method": method,
                 "unresolvedCitations": record.get("_citingUnresolved"),
-                "rank": round(rank, 3), "peerGroup": group, "peerN": size},
+                "rank": round(rank, 3), "peerGroup": group, "peerN": size,
+                "peerStats": ctx.peer_stats("uniqueCitingApplicants", record)},
         notes=notes)

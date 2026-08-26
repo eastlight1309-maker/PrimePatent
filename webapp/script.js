@@ -1089,6 +1089,7 @@
           track.appendChild(fill);
           box.appendChild(track);
           if (component.detail && Object.keys(component.detail).length) {
+            renderPeerStats(box, component.detail);
             box.appendChild(el("div", "pp-comp-detail", summarizeDetail(component.detail)));
           }
           (component.notes || []).forEach(function (note) {
@@ -1113,6 +1114,35 @@
       }
       $("pp-detail").hidden = false;
     }).catch(function (error) { toast(error.message, "err"); });
+  }
+
+  /* 비교집단 분포(최소·사분위·중앙·최대)를 사람이 읽을 수 있게 표시한다.
+     백분위 숫자만으로는 '이 값이 집단에서 어느 수준인지' 알 수 없기 때문. */
+  var PEER_STATS_LABEL = {
+    claimPeerStats: "비교집단 청구항 수",
+    independentPeerStats: "비교집단 독립항 수",
+    cpcPeerStats: "비교집단 CPC 서브그룹 수",
+    peerStats: "비교집단 분포"
+  };
+
+  function renderPeerStats(box, detail) {
+    Object.keys(PEER_STATS_LABEL).forEach(function (key) {
+      var stats = detail[key];
+      if (!stats || !stats.n) return;
+      var line = el("div", "pp-peer-stats");
+      line.appendChild(el("b", null, PEER_STATS_LABEL[key] + (stats.unit ? " · " + stats.unit : "")));
+      [["최소", stats.min], ["25%", stats.p25], ["중앙", stats.median],
+       ["75%", stats.p75], ["최대", stats.max], ["평균", stats.mean]].forEach(function (pair) {
+        if (pair[1] === null || pair[1] === undefined) return;
+        var cell = el("span", "pp-peer-cell");
+        cell.appendChild(el("span", "pp-peer-key", pair[0]));
+        cell.appendChild(el("span", "pp-peer-val", pair[1]));
+        line.appendChild(cell);
+      });
+      line.appendChild(el("span", "pp-peer-n", "표본 " + stats.n + "건"));
+      box.appendChild(line);
+      delete detail[key];        // 아래 원시 요약에서 중복 출력 방지
+    });
   }
 
   function summarizeDetail(detail) {

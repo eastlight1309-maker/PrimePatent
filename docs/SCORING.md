@@ -11,6 +11,7 @@
 | 비교집단 | `peers.PeerIndex.rank()` — `Topic+연도` → `Topic+연도±N` → `Topic` → 전체, 표본 부족 시 중립 0.5 |
 | 비교집단 모집단 | **채점 단위(패밀리 대표문헌)**. 전체 문헌으로 구성하면 다국 출원 패밀리가 분포를 지배해 백분위가 왜곡된다 |
 | 백분위 | `peers.percent_rank_inc()` = 엑셀 `PERCENTRANK.INC` = (자신보다 작은 값 수)/(n-1) |
+| 비교집단 분포 | `peers.PeerIndex.stats()` — 최소/25%/중앙/75%/최대/평균(엑셀 `PERCENTILE.INC` 정의). 결과 상세 화면에 함께 표시된다. 피인용은 로그 역변환해 건수로 보여 준다 |
 | 로그 변환 | `LN(1+x)` (`parsing.safe_log1p`) |
 | 기준일 | 설정 `as_of_date`, 미지정 시 실행일 |
 

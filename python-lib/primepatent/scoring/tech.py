@@ -82,6 +82,7 @@ def _generality(record: Dict[str, Any], analysis: Dict[str, Any],
         llm_score=round(llm_part, 3), quant_score=round(cpc_part, 3),
         detail={"llmGenerality": llm_raw, "cpcSubgroupCount": subgroups,
                 "cpcRank": round(rank, 3), "peerGroup": group, "peerN": size,
+                "cpcPeerStats": ctx.peer_stats("cpcSubgroups", record),
                 "mainGroupCount": len(record.get("cpcMainGroups") or [])},
         notes=[] if subgroups else ["CPC 정보가 없어 정량 보조점수 0점"])
 
