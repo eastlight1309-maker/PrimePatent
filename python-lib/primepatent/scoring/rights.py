@@ -15,6 +15,10 @@ from .context import AnalysisContext
 
 LABEL = "권리 중요도"
 
+# 권리유지·방어 신호 배점 분해 (합 7점)
+DIVISIONAL_POINTS = 2.0
+DISPUTE_POINTS = 5.0
+
 
 def score(record: Dict[str, Any], analysis: Dict[str, Any], ctx: AnalysisContext) -> AreaResult:
     components: List[Component] = [
@@ -47,7 +51,8 @@ def _claim_scope(record: Dict[str, Any], analysis: Dict[str, Any],
     ind_rank, ind_group, ind_n = ctx.rank("independentClaimCount", record,
                                           record.get("independentClaimCount"))
     claim_rank, claim_group, claim_n = ctx.rank("claimCount", record, record.get("claimCount"))
-    quant = 2.0 * ind_rank + 2.0 * claim_rank
+    # 정량 2점 = 독립항 수 백분위 × 1 + 전체 청구항 수 백분위 × 1
+    quant = 1.0 * ind_rank + 1.0 * claim_rank
 
     llm_score = float(analysis.get("claimBreadthScore") or 0.0)
     notes = []
@@ -92,27 +97,25 @@ def _remaining_term(record: Dict[str, Any]) -> Component:
 
 
 def _defense_signal(record: Dict[str, Any]) -> Component:
-    """분할·연속출원 1 + 심판·분쟁 1 + 양도·실시권 1 (패밀리 단위 신호)."""
+    """분할·연속출원 존재 2점 + 심판·무효·이의 등 권리분쟁 존재 5점 (패밀리 단위 신호).
+
+    분쟁 판정에는 심판 전체 횟수 / 심판 종류 / 소송 전체 횟수를 사용한다.
+    (양도·실시권은 상업화·거래 신호로 이동했다)
+    """
     signals = (record.get("_family") or {}).get("signals") or {}
     divisional = signals.get("divisional")
     dispute = signals.get("hasDispute")
-    license_flag = signals.get("licenseFlag")
-    assignment = signals.get("assignment")
 
     value = 0.0
     missing = []
     if divisional is True:
-        value += 1.0
+        value += DIVISIONAL_POINTS
     elif divisional is None:
         missing.append("분할출원 여부")
     if dispute is True:
-        value += 1.0
+        value += DISPUTE_POINTS
     elif dispute is None:
         missing.append("심판/소송")
-    if license_flag is True or assignment is True:
-        value += 1.0
-    elif license_flag is None and assignment is None:
-        missing.append("양도/실시권")
 
     notes = []
     if missing:
@@ -121,6 +124,9 @@ def _defense_signal(record: Dict[str, Any]) -> Component:
         "rights.defenseSignal", "권리유지·방어 신호", value,
         detail={"divisional": divisional, "dispute": dispute,
                 "trialCount": signals.get("trialCount"),
-                "licenseFlag": license_flag, "assignment": assignment,
+                "trialTypes": signals.get("trialTypes"),
+                "litigationCount": signals.get("litigationCount"),
+                "divisionalPoints": DIVISIONAL_POINTS if divisional is True else 0.0,
+                "disputePoints": DISPUTE_POINTS if dispute is True else 0.0,
                 "missingSignals": missing},
         notes=notes)

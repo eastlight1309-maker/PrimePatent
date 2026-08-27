@@ -110,10 +110,8 @@ class AnalysisContext:
     def _build_peers(self) -> None:
         metrics = {
             "logForward": lambda r: safe_log1p(r.get("forwardCitationCountResolved")),
-            "logBackward": lambda r: safe_log1p(r.get("backwardCitationCountResolved")),
             "claimCount": lambda r: r.get("claimCount"),
             "independentClaimCount": lambda r: r.get("independentClaimCount"),
-            "cpcSubgroups": lambda r: len(r.get("cpcSubgroups") or []) or None,
             "citationSpeed": self.citation_speed,
             "uniqueCitingApplicants": self.unique_citing_applicants,
             "priorityOrdinal": self.priority_ordinal,

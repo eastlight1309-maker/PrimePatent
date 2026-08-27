@@ -1,54 +1,79 @@
 # -*- coding: utf-8 -*-
-"""영향력·경쟁성 (연령보정 피인용 + 기술 원천성).
+"""영향력·경쟁성.
 
+경쟁사 커버리지 + 연령보정 피인용 영향력 + 기술 선도성
 배점은 config.COMPONENT_MAX 가 단일 기준이다.
 """
 
 from __future__ import annotations
 
+import math
 from typing import Any, Dict, List
 
+from ..config import COMPONENT_MAX
 from ..parsing import safe_log1p
 from .common import AreaResult, Component, make_component
 from .context import AnalysisContext
 
 LABEL = "영향력·경쟁성"
 
-# 7.3 후방인용 적정구간(백분위) - 지나치게 적거나 많으면 감점
-BACKWARD_SWEET_SPOT = (0.2, 0.8)
-
 
 def score(record: Dict[str, Any], analysis: Dict[str, Any], ctx: AnalysisContext) -> AreaResult:
     components: List[Component] = [
+        _competitor_coverage(record, ctx),
         _citation(record, ctx),
-        _originality(record, ctx),
+        _leadership(record, ctx),
     ]
     return AreaResult(key="impact", label=LABEL, components=components)
 
 
-def _raw_citation_stats(record: Dict[str, Any], ctx: AnalysisContext):
-    """피인용 비교집단 분포를 원값(건수) 기준으로 환산해 돌려준다.
+def _competitor_coverage(record: Dict[str, Any], ctx: AnalysisContext) -> Component:
+    """고유 비자기 피인용 출원인 수 백분위 × 5.
 
-    내부 백분위는 LN(1+x) 로 계산하지만, 화면에는 사람이 읽을 수 있는 건수로 보여야 한다.
+    '타인 피인용 문헌번호(F1)' 를 근거로 하되, 업로드 모집단 안에서 각 인용문헌의
+    출원인을 해석해 **고유 출원인 수**를 센다(같은 회사가 여러 건 인용해도 1로 셈).
+    해석률이 낮으면 문헌 수를 대용지표로 쓰고 그 사실을 method 로 표기한다.
     """
-    import math as _math
+    maximum = COMPONENT_MAX["impact.competitorCoverage"]
+    value_raw = ctx.unique_citing_applicants(record)
+    rank, group, size = ctx.rank("uniqueCitingApplicants", record, value_raw)
+    method = record.get("_uniqueCitingApplicantsMethod")
+    citing_docs = len(record.get("otherForwardCitations") or [])
+    notes = []
+    if method == "proxy":
+        notes.append("피인용 문헌의 출원인을 모집단에서 확인할 수 없어 "
+                     "'타인 피인용 문헌 수'를 대용지표로 사용했습니다.")
+    return make_component(
+        "impact.competitorCoverage", "경쟁사 커버리지", rank * maximum,
+        detail={"uniqueCitingApplicants": value_raw,
+                "otherForwardCitationDocs": citing_docs,
+                "method": method,
+                "unresolvedCitations": record.get("_citingUnresolved"),
+                "rank": round(rank, 3), "peerGroup": group, "peerN": size,
+                "peerStats": ctx.peer_stats("uniqueCitingApplicants", record)},
+        notes=notes)
+
+
+def _raw_citation_stats(record: Dict[str, Any], ctx: AnalysisContext):
+    """피인용 비교집단 분포를 원값(건수) 기준으로 환산해 돌려준다."""
     stats = ctx.peer_stats("logForward", record)
     if not stats:
         return None
     converted = dict(stats)
     for key in ("min", "p25", "median", "p75", "max", "mean"):
         if converted.get(key) is not None:
-            raw = _math.expm1(float(converted[key]))
+            raw = math.expm1(float(converted[key]))
             converted[key] = int(round(raw)) if abs(raw - round(raw)) < 0.01 else round(raw, 1)
     converted["unit"] = "피인용 건수(로그 역변환)"
     return converted
 
 
 def _citation(record: Dict[str, Any], ctx: AnalysisContext) -> Component:
-    """LN(1+피인용) 의 동일주제·동일우선연도 백분위 × 8.
+    """LN(1+피인용) 의 동일주제·동일우선연도 백분위 × 15.
 
     비교집단 표본이 부족하면 연간 피인용 속도 백분위로 대체한다.
     """
+    maximum = COMPONENT_MAX["impact.citation"]
     forward = record.get("forwardCitationCountResolved") or 0
     log_value = safe_log1p(forward)
     rank, group, size = ctx.rank("logForward", record, log_value)
@@ -60,52 +85,53 @@ def _citation(record: Dict[str, Any], ctx: AnalysisContext) -> Component:
         if speed_group not in ("insufficient", "none"):
             rank, group, size, method = speed_rank, speed_group, speed_size, "citationSpeed"
             notes.append("비교집단 표본 부족으로 연간 피인용 속도 백분위를 사용했습니다.")
+    speed = ctx.citation_speed(record)
     return make_component(
-        "impact.citation", "연령보정 피인용 영향력", rank * 8.0,
+        "impact.citation", "연령보정 피인용 영향력", rank * maximum,
         detail={"forwardCitations": forward, "logForward": round(log_value, 4),
-                "citationSpeed": None if ctx.citation_speed(record) is None
-                else round(ctx.citation_speed(record), 3),
+                "citationSpeed": None if speed is None else round(speed, 3),
                 "method": method, "rank": round(rank, 3),
                 "peerGroup": group, "peerN": size,
-                # 로그 변환 전 원값 기준 분포(해석용)
                 "peerStats": _raw_citation_stats(record, ctx)},
         notes=notes)
-def _originality(record: Dict[str, Any], ctx: AnalysisContext) -> Component:
-    """주제 내 초기 출원 1.5 + 비자기 확산성 1.5 + 적정 후방인용 구조 1."""
+
+
+def _leadership(record: Dict[str, Any], ctx: AnalysisContext) -> Component:
+    """기술 선도성 = (1 − 동일주제 최초우선일 백분위) × 5.
+
+    주제 안에서 얼마나 이른 시점의 출원인지만 본다(빠를수록 높은 점수).
+    """
+    maximum = COMPONENT_MAX["impact.leadership"]
     ordinal = ctx.priority_ordinal(record)
-    date_rank, date_group, date_size = ctx.rank("priorityOrdinal", record, ordinal)
-    early = (1.0 - date_rank) * 1.5 if ordinal is not None else 0.0
-
-    forward = record.get("forwardCitationCountResolved") or 0
-    other = record.get("otherForwardCount") or 0
-    ratio = (other / forward) if forward else 0.0
-    unique_applicants = ctx.unique_citing_applicants(record) or 0.0
-    applicant_rank, _, _ = ctx.rank("uniqueCitingApplicants", record, unique_applicants)
-    diffusion = min(1.5, (max(0.0, min(1.0, ratio)) * 0.75) + applicant_rank * 0.75)
-
-    backward = record.get("backwardCitationCountResolved")
-    back_rank, back_group, back_size = ctx.rank("logBackward", record, safe_log1p(backward)) \
-        if backward is not None else (0.0, "none", 0)
-    low, high = BACKWARD_SWEET_SPOT
-    if backward is None:
-        structure = 0.0
-    elif low <= back_rank <= high:
-        structure = 1.0
-    else:
-        distance = (low - back_rank) if back_rank < low else (back_rank - high)
-        structure = max(0.0, 1.0 - distance / max(low, 1.0 - high) * 0.7)
-
+    date_rank, group, size = ctx.rank("priorityOrdinal", record, ordinal)
+    value = (1.0 - date_rank) * maximum if ordinal is not None else 0.0
     notes = []
     if ordinal is None:
-        notes.append("우선일 정보가 없어 초기 출원 점수를 계산할 수 없습니다.")
-    if backward is None:
-        notes.append("후방인용 정보가 없어 인용구조 점수 0점입니다.")
+        notes.append("최초우선일 정보가 없어 0점 처리했습니다.")
     return make_component(
-        "impact.originality", "기술 원천성", early + diffusion + structure,
+        "impact.leadership", "기술 선도성", value,
         detail={"priorityDate": record.get("earliestPriorityDate"),
-                "priorityRank": round(date_rank, 3), "earlinessScore": round(early, 3),
-                "peerGroup": date_group, "peerN": date_size,
-                "diffusionScore": round(diffusion, 3),
-                "backwardCitations": backward, "backwardRank": round(back_rank, 3),
-                "backwardStructureScore": round(structure, 3)},
+                "priorityRank": round(date_rank, 3),
+                "earlinessRank": round(1.0 - date_rank, 3),
+                "peerGroup": group, "peerN": size,
+                "peerStats": _priority_year_stats(ctx, record)},
         notes=notes)
+
+
+def _priority_year_stats(ctx: AnalysisContext, record: Dict[str, Any]):
+    """우선일 분포를 연도로 환산해 보여 준다(ordinal 숫자는 읽을 수 없으므로)."""
+    from datetime import date as _date
+    stats = ctx.peer_stats("priorityOrdinal", record)
+    if not stats:
+        return None
+    converted = dict(stats)
+    for key in ("min", "p25", "median", "p75", "max", "mean"):
+        value = converted.get(key)
+        if value is None:
+            continue
+        try:
+            converted[key] = _date.fromordinal(int(round(float(value)))).year
+        except (ValueError, OverflowError):
+            converted[key] = None
+    converted["unit"] = "최초우선연도"
+    return converted

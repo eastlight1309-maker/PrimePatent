@@ -39,68 +39,145 @@ def _keywords(prompt: str) -> List[str]:
 
 
 def estimate_from_prompt(prompt: str) -> str:
+    """규칙 기반 근사치. 실제 LLM 판단을 대체하지 못한다."""
     sections = _sections(prompt)
     title = sections.get("발명의 명칭", "")
     abstract = sections.get("요약", "")
     claim = sections.get("대표청구항", "") or sections.get("독립청구항", "")
     independent = sections.get("독립청구항", "")
-    problem = sections.get("해결과제 요약", "")
-    effect = sections.get("효과 요약", "")
-    corpus = " ".join([title, abstract, claim, independent, problem, effect])
-    corpus_lower = corpus.lower()
 
-    keywords = _keywords(prompt)
-    if keywords:
-        hits = sum(1 for k in keywords if k and k in corpus_lower)
-        fit = 45 + min(50, int(hits / max(1, len(keywords)) * 100 * 0.55))
-    else:
-        fit = 70 if corpus.strip() else 0
-
+    core_terms = _core_terms(prompt)
     numeric_count = len(_NUMERIC_RE.findall(claim))
     material = bool(_MATERIAL_RE.search(claim))
     process_order = bool(_PROCESS_RE.search(claim))
     functional_hits = len(_FUNCTIONAL_RE.findall(claim))
-    elements = max(1, len(re.split(r"[;\n]|(?<=[가-힣])\s*와\s*|,\s*(?=[가-힣])", claim))) if claim else 0
-    categories = sum(1 for pattern in _CATEGORY_RE if pattern.search(independent or claim))
+    claim_types = _claim_types(independent or claim)
+    independent_count = max(1, len(re.findall(r"제\s*\d+\s*항", independent))) if independent else 0
 
+    # --- 1) 권리범위 넓이 0~3 ---
     if not claim.strip():
-        breadth = 0
+        breadth = 0.0
     else:
-        breadth = 4
-        breadth -= min(2, numeric_count // 2)
+        breadth = 3.0
+        breadth -= min(1.5, numeric_count * 0.5)
         if material:
             breadth -= 0.5
         if process_order:
             breadth -= 0.5
-        if elements > 8:
-            breadth -= 1
         if functional_hits >= 3:
             breadth += 0.5
-        breadth = max(0, min(4, breadth))
+        breadth = max(0.0, min(3.0, breadth))
 
-    length_signal = min(1.0, len(corpus) / 3000.0)
-    contribution = round(min(8.0, 2.0 + length_signal * 3.0 + (breadth / 4.0) * 3.0), 1)
-    problem_score = 2 if problem else (1 if abstract else 0)
-    effect_score = 2 if (_NUMERIC_RE.search(effect or abstract or "")) else (1 if effect or abstract else 0)
-    generality = max(0, min(4, round(breadth * 0.75 + (1 if categories >= 2 else 0), 1)))
+    # --- 2) 핵심기술 중심성 0~5 ---
+    hits_in_claim = sum(1 for term in core_terms if term in claim.lower())
+    hits_in_abstract = sum(1 for term in core_terms if term in abstract.lower())
+    if not claim.strip():
+        centrality = 0.0
+    elif not core_terms:
+        centrality = 2.0
+    elif hits_in_claim >= 2:
+        centrality = 4.0 if independent_count >= 2 else 3.0
+    elif hits_in_claim == 1:
+        centrality = 3.0
+    elif hits_in_abstract:
+        centrality = 1.0
+    else:
+        centrality = 0.0
+
+    # --- 3) 청구항 확장도 0~5 ---
+    total_claims = _int_from(sections.get("청구항 수 / 독립항 수", ""), 0)
+    related = hits_in_claim + (1 if hits_in_abstract else 0)
+    ratio = (related / total_claims) if total_claims else 0.0
+    if not claim.strip() or not core_terms:
+        expansion = 0.0
+    elif ratio >= 0.45 or related >= 4:
+        expansion = 4.0
+    elif ratio >= 0.30 or related >= 3:
+        expansion = 3.0
+    elif ratio >= 0.20 or related >= 2:
+        expansion = 2.0
+    elif related >= 1:
+        expansion = 1.0
+    else:
+        expansion = 0.5
+
+    # --- 4) 독립청구항 유형 다양성 0~3 ---
+    if not claim.strip():
+        diversity = 0.0
+    elif len(claim_types) >= 3:
+        diversity = 3.0
+    elif len(claim_types) == 2:
+        diversity = 2.5
+    elif independent_count >= 2:
+        diversity = 2.0
+    elif independent_count == 1:
+        diversity = 1.5 if total_claims > 1 else 1.0
+    else:
+        diversity = 1.0
 
     payload = {
-        "topicFitPercent": int(max(0, min(100, fit))),
         "claimBreadthScore": round(float(breadth), 1),
-        "coreContributionScore": float(contribution),
-        "problemImportanceScore": int(problem_score),
-        "effectEvidenceScore": int(effect_score),
-        "generalityScore": float(generality),
+        "coreCentralityScore": float(centrality),
+        "claimExpansionScore": float(expansion),
+        "claimTypeDiversityScore": float(diversity),
         "claimAnalysis": {
-            "essentialElementCount": int(elements),
+            "coreElementsInIndependentClaims": [t for t in core_terms if t in claim.lower()][:6],
+            "linkageClaimed": hits_in_claim >= 2,
+            "independentClaimsWithCore": min(independent_count, hits_in_claim),
+            "relatedClaimCount": related,
+            "totalClaimCount": total_claims,
+            "relatedClaimRatio": round(ratio, 3),
+            "expansionDependentCount": max(0, related - 1),
+            "claimTypes": claim_types,
+            "independentClaimCount": independent_count,
             "numericLimitationCount": int(numeric_count),
-            "materialLimitation": bool(material),
-            "processOrderLimitation": bool(process_order),
-            "functionalLanguage": "high" if functional_hits >= 3 else ("low" if functional_hits == 0 else "medium"),
-            "multiCategoryIndependentClaims": categories >= 2,
-            "designAroundRisk": "low" if breadth >= 3.5 else ("high" if breadth <= 1.5 else "medium"),
+            "designAroundRisk": "low" if breadth >= 2.5 else ("high" if breadth <= 1 else "medium"),
         },
         "keyFeatures": _KEY_TERMS_RE.findall(title)[:5],
-        "rationale": "LLM 미사용(휴리스틱 추정): 청구항 한정 개수·텍스트 길이·키워드 일치도로 산출한 근사치입니다.",
+        "centralityRationale": "LLM 미사용(휴리스틱): 핵심기술 키워드의 청구항 등장 횟수로 근사했습니다.",
+        "expansionRationale": "LLM 미사용(휴리스틱): 키워드 일치 청구항 수와 전체 청구항 수의 비율로 근사했습니다.",
+        "diversityRationale": "LLM 미사용(휴리스틱): 독립청구항 문장에서 유형 표현을 탐지해 근사했습니다.",
+        "rationale": "LLM 미사용(휴리스틱 추정): 청구항 한정 개수·키워드 일치도로 산출한 근사치입니다. "
+                     "실제 평가로 사용하지 마십시오.",
     }
     return json.dumps(payload, ensure_ascii=False)
+
+
+def _core_terms(prompt: str) -> List[str]:
+    """핵심기술 설명 + 키워드에서 판정용 용어를 뽑는다."""
+    terms: List[str] = []
+    match = re.search(r"## 핵심기술 설명 \(모든 판정의 기준\)\n(.+?)(?=\n##|\n\[)", prompt, re.S)
+    if match and "입력되지 않았습니다" not in match.group(1):
+        terms += [t.lower() for t in _KEY_TERMS_RE.findall(match.group(1)) if len(t) >= 2]
+    keyword_match = re.search(r"- 핵심 키워드: (.+)", prompt)
+    if keyword_match:
+        terms += [k.strip().lower() for k in keyword_match.group(1).split(",") if k.strip()]
+    out, seen = [], set()
+    for term in terms:
+        if term not in seen:
+            seen.add(term)
+            out.append(term)
+    return out[:20]
+
+
+_TYPE_PATTERNS = [
+    ("장치/패키지", re.compile(r"(패키지|장치|디바이스|소자|기판|apparatus|device|package)", re.I)),
+    ("제조방법", re.compile(r"(제조\s*방법|제조방법|manufactur\w*\s*method|fabricat\w*)", re.I)),
+    ("시스템/전자장치", re.compile(r"(시스템|전자\s*장치|electronic\s*device|system)", re.I)),
+    ("중간제품/부품", re.compile(r"(인터포저|리드프레임|기판\s*구조체|interposer|substrate\s*structure)", re.I)),
+    ("공정방법", re.compile(r"(본딩\s*방법|접합\s*방법|공정\s*방법|bonding\s*method|process\s*method)", re.I)),
+    ("검사방법", re.compile(r"(검사\s*방법|측정\s*방법|inspection\s*method|test\s*method)", re.I)),
+]
+
+
+def _claim_types(text: str) -> List[str]:
+    found = []
+    for label, pattern in _TYPE_PATTERNS:
+        if pattern.search(text or ""):
+            found.append(label)
+    return found
+
+
+def _int_from(text: str, default: int = 0) -> int:
+    match = re.search(r"\d+", text or "")
+    return int(match.group(0)) if match else default

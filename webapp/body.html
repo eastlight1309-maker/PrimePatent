@@ -137,6 +137,10 @@
         <label class="pp-field"><span>핵심 키워드 (쉼표 구분)</span>
           <input type="text" id="cfg-topic-keywords" class="pp-input"
             placeholder="하이브리드 본딩, 미세 피치, TSV, 팬아웃, 휨"></label>
+        <label class="pp-field"><span>핵심기술 설명 <b class="pp-req">*</b>
+            <span class="pp-help" style="display:inline">청구범위 강도·중심성·확장도·유형 다양성 판정의 기준</span></span>
+          <textarea id="cfg-core-tech" class="pp-input" rows="4"
+            placeholder="예: 두 반도체 칩을 접착제 없이 구리-구리 직접 접합하는 하이브리드 본딩 구조.&#10;핵심 구성요소: 구리 패드, 절연층(SiCN), 5㎛ 이하 접합 피치, 평탄화된 본딩면"></textarea></label>
         <label class="pp-field"><span>기준일 (비우면 오늘)</span>
           <input type="date" id="cfg-as-of" class="pp-input"></label>
       </div>
@@ -167,13 +171,10 @@
       <div class="pp-card">
         <h2>스코어링 규칙</h2>
         <div class="pp-grid-2">
-          <label class="pp-field"><span>Gate 1 · Topic 적합도 하한(%)</span>
+          <label class="pp-field"><span>Gate 1 · IPURE 적합도 하한(%)</span>
             <input type="number" id="cfg-gate" class="pp-input" min="0" max="100" value="70"></label>
-          <label class="pp-field"><span>적합도 환산</span>
-            <select id="cfg-fit-mode" class="pp-input">
-              <option value="softened">완화식 (적합도-60)/40×8</option>
-              <option value="linear">선형 적합도/100×8</option>
-            </select></label>
+          <label class="pp-field"><span>IPURE AI Score 만점</span>
+            <input type="number" id="cfg-ipure-max" class="pp-input" min="0.01" step="1" value="100"></label>
           <label class="pp-field"><span>비교집단 최소 표본</span>
             <input type="number" id="cfg-peer-min" class="pp-input" min="2" max="1000" value="20"></label>
           <label class="pp-field"><span>비교연도 ±N년</span>
@@ -196,8 +197,10 @@
         <h2>가중치</h2>
         <h3>영역 가중치 (1.0 = 스펙 기본배점)</h3>
         <div class="pp-grid-4" id="cfg-area-weights"></div>
-        <h3>주요 시장 진입도 국가 가중치 (상한 8)</h3>
-        <div class="pp-grid-4" id="cfg-market-weights"></div>
+        <h3>주요 시장 진입도 · 소비·권리시장 (상한 10)</h3>
+        <div class="pp-grid-4" id="cfg-consumer-weights"></div>
+        <h3>주요 시장 진입도 · 제조·공급망시장 (상한 5)</h3>
+        <div class="pp-grid-4" id="cfg-supply-weights"></div>
       </div>
     </div>
 

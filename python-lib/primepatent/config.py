@@ -29,24 +29,25 @@ ALLOWED_LLM_IDS = frozenset(llm_id for _, llm_id in ALLOWED_LLM_CANDIDATES)
 # 영역 합계(AREA_MAX)와 총점(TOTAL_MAX)은 아래 표에서 자동 계산된다.
 # 지표를 추가/삭제해도 합계가 어긋나지 않게 하기 위함이다.
 COMPONENT_MAX = {
-    # 권리 중요도 30
-    "rights.survival": 8.0,
-    "rights.claimScope": 8.0,          # 정량 4 + LLM 4
-    "rights.remainingTerm": 4.0,
-    "rights.defenseSignal": 3.0,
-    # 기술 중요도 30
-    "tech.topicFit": 8.0,
-    "tech.contribution": 8.0,
-    "tech.problemEffect": 6.0,         # 문제 3 + 효과 3
-    "tech.generality": 4.0,            # LLM 3 + CPC 1
-    # 시장 중요도 20
-    "market.entry": 8.0,
-    "market.applicantPower": 5.0,
-    "market.commercial": 4.0,
-    "market.competitorCoverage": 3.0,
-    # 영향력·경쟁성 20
-    "impact.citation": 8.0,
-    "impact.originality": 4.0,
+    # 권리 중요도 27
+    "rights.survival": 10.0,           # 권리 생존성
+    "rights.claimScope": 5.0,          # 청구범위 강도 (정량 2 + LLM 3)
+    "rights.remainingTerm": 5.0,       # 잔존기간
+    "rights.defenseSignal": 7.0,       # 권리유지·방어 신호
+    # 기술 중요도 21
+    "tech.topicFit": 8.0,              # Primary Topic 적합도 (IPURE AI Score)
+    "tech.coreCentrality": 5.0,        # 독립청구항 내 핵심기술 중심성
+    "tech.claimExpansion": 5.0,        # 핵심기술의 청구항 확장도
+    "tech.claimTypeDiversity": 3.0,    # 독립청구항 유형 다양성
+    # 시장 중요도 27
+    "market.entry": 15.0,              # 주요 시장 진입도 (소비 10 + 공급망 5)
+    "market.applicantPower": 4.0,      # 출원인 시장 영향력
+    "market.commercial": 6.0,          # 상업화·거래 신호
+    "market.familySize": 2.0,          # 패밀리 건수
+    # 영향력·경쟁성 25
+    "impact.competitorCoverage": 5.0,  # 경쟁사 커버리지
+    "impact.citation": 15.0,           # 연령보정 피인용 영향력
+    "impact.leadership": 5.0,          # 기술 선도성
 }
 
 AREA_ORDER = ["rights", "tech", "market", "impact"]
@@ -67,25 +68,26 @@ TOTAL_MAX = round(sum(AREA_MAX.values()), 6)
 # 세부지표별 산출 방식(정량/LLM)
 COMPONENT_SOURCE = {
     "rights.survival": "quant",
-    "rights.claimScope": "mixed",      # 정량 4 / LLM 4
+    "rights.claimScope": "mixed",           # 정량 2 / LLM 3
     "rights.remainingTerm": "quant",
     "rights.defenseSignal": "quant",
-    "tech.topicFit": "llm",
-    "tech.contribution": "llm",
-    "tech.problemEffect": "llm",
-    "tech.generality": "mixed",        # LLM 3 / 정량 1
+    "tech.topicFit": "quant",               # IPURE AI Score 컬럼값 사용
+    "tech.coreCentrality": "llm",
+    "tech.claimExpansion": "llm",
+    "tech.claimTypeDiversity": "llm",
     "market.entry": "quant",
     "market.applicantPower": "quant",
     "market.commercial": "quant",
-    "market.competitorCoverage": "quant",
+    "market.familySize": "quant",
+    "impact.competitorCoverage": "quant",
     "impact.citation": "quant",
-    "impact.originality": "quant",
+    "impact.leadership": "quant",
 }
+
 
 # mixed(정량+LLM) 세부지표의 배점 분해 (정량 상한, LLM 상한)
 COMPONENT_MIXED_SPLIT = {
-    "rights.claimScope": (4.0, 4.0),     # 정량: 청구항/독립항 백분위, LLM: 권리범위 넓이
-    "tech.generality": (1.0, 3.0),       # 정량: CPC 서브그룹 백분위, LLM: 범용성 판단
+    "rights.claimScope": (2.0, 3.0),     # 정량: 청구항/독립항 백분위, LLM: 권리범위 넓이
 }
 
 
@@ -100,26 +102,30 @@ def mixed_max(component_key):
     return COMPONENT_MIXED_SPLIT.get(component_key, (maximum / 2.0, maximum / 2.0))
 
 
-# 6.1 주요 시장 진입도 - 국가 가중치 (합계 상한 8점)
-# 스펙 본문의 소비/공급망 분리 서술을 하나의 표로 합친 값(스펙 내 엑셀 수식 기준).
-DEFAULT_MARKET_COUNTRY_WEIGHTS = {
-    "US": 2.0, "CN": 1.8, "JP": 1.2, "EP": 1.0, "KR": 1.0, "TW": 1.0,
-}
+# 주요 시장 진입도 (소비·권리시장 10점 + 제조·공급망시장 5점 = 15점)
+# 패밀리에 해당 국가 출원이 "존재하는가" 만 보고 가중치를 합산한다.
+DEFAULT_MARKET_CONSUMER_WEIGHTS = {"US": 4.2, "CN": 2.2, "EP": 2.1, "JP": 1.1, "KR": 0.4}
+DEFAULT_MARKET_SUPPLY_WEIGHTS = {"CN": 1.5, "JP": 1.5, "KR": 0.8, "TW": 0.8, "US": 0.4}
+MARKET_CONSUMER_MAX = 10.0
+MARKET_SUPPLY_MAX = 5.0
+
+# 패밀리 건수 구간점수 (하한, 점수)
+FAMILY_SIZE_BANDS = [(8.0, 2.0), (6.0, 1.5), (4.0, 1.0), (3.0, 0.5), (0.0, 0.0)]
 
 # 4.1 권리 생존성 구간점수
 SURVIVAL_SCORES = {
-    "granted_alive": 8.0,
-    "granted_expiring": 6.0,
-    "under_examination": 5.0,
-    "filed": 3.0,
-    "lapsed": 2.0,
-    "rejected": 0.0,
+    "granted_alive": 10.0,        # 등록·존속
+    "granted_expiring": 8.0,      # 등록·존속기간 만료 임박(잔존 2년 이하)
+    "under_examination": 6.0,     # 공개·심사 중
+    "filed": 4.0,                 # 출원 중·심사 미청구
+    "lapsed": 2.0,                # 등록 후 소멸·포기
+    "rejected": 0.0,              # 거절 확정·취하·포기
     "invalidated": 0.0,
     "unknown": 2.0,
 }
 
 # 4.4 잔존기간 구간점수 (년 단위 하한, 점수)
-REMAINING_TERM_BANDS = [(12.0, 4.0), (8.0, 3.0), (4.0, 2.0), (0.0, 1.0)]
+REMAINING_TERM_BANDS = [(12.0, 5.0), (8.0, 4.0), (4.0, 3.0), (0.0, 1.0)]
 PATENT_TERM_YEARS = 20.0
 
 
@@ -131,13 +137,15 @@ class ScoringConfig:
     topic_name: str = "Primary Topic"
     topic_description: str = ""
     topic_keywords: List[str] = field(default_factory=list)
+    # 핵심기술 설명 - 청구범위 강도/중심성/확장도/유형 다양성 판정의 기준이 된다.
+    core_technology: str = ""
+
+    # IPURE AI Score 만점(백분율 환산 기준). 0~1 스케일이면 1 로 지정.
+    ipure_score_max: float = 100.0
 
     # Gate
     gate_topic_fit_min: float = 70.0          # Gate 1: Primary Topic 적합도(%)
     apply_gate: bool = True                   # False 면 gate 결과를 표시만 하고 제외하지 않음
-
-    # 기술 적합도 환산 방식: "softened" = MIN(8, MAX(0,(fit-60)/40*8)), "linear" = fit/100*8
-    topic_fit_mode: str = "softened"
 
     # 비교집단(백분위) 설정
     peer_min_size: int = 20                   # 비교집단 최소 표본
@@ -151,9 +159,11 @@ class ScoringConfig:
     )
     dedupe_by_family: bool = True
 
-    # 국가 가중치
-    market_country_weights: Dict[str, float] = field(
-        default_factory=lambda: dict(DEFAULT_MARKET_COUNTRY_WEIGHTS))
+    # 국가 가중치 (주요 시장 진입도)
+    market_consumer_weights: Dict[str, float] = field(
+        default_factory=lambda: dict(DEFAULT_MARKET_CONSUMER_WEIGHTS))
+    market_supply_weights: Dict[str, float] = field(
+        default_factory=lambda: dict(DEFAULT_MARKET_SUPPLY_WEIGHTS))
 
     # 영역 가중치(총점 재배분용. 1.0 = 스펙 기본 배점)
     area_weights: Dict[str, float] = field(
@@ -213,8 +223,6 @@ class ScoringConfig:
     def validate(self) -> None:
         if self.llm_id not in ALLOWED_LLM_IDS:
             self.llm_id = DEFAULT_LLM_ID
-        if self.topic_fit_mode not in ("softened", "linear"):
-            self.topic_fit_mode = "softened"
         if self.family_id_source not in ("wips", "epo"):
             self.family_id_source = "wips"
         if self.family_country_source not in ("auto", "wips", "epo"):
@@ -233,9 +241,13 @@ class ScoringConfig:
         for key in AREA_MAX:
             self.area_weights.setdefault(key, 1.0)
             self.area_weights[key] = _clamp(float(self.area_weights[key]), 0.0, 3.0)
-        self.market_country_weights = {
-            str(k).upper(): _clamp(float(v), 0.0, 8.0)
-            for k, v in self.market_country_weights.items() if str(k).strip()}
+        self.market_consumer_weights = {
+            str(k).upper(): _clamp(float(v), 0.0, 15.0)
+            for k, v in self.market_consumer_weights.items() if str(k).strip()}
+        self.market_supply_weights = {
+            str(k).upper(): _clamp(float(v), 0.0, 15.0)
+            for k, v in self.market_supply_weights.items() if str(k).strip()}
+        self.ipure_score_max = max(0.0001, float(self.ipure_score_max or 100.0))
         self.topic_keywords = [str(k).strip() for k in self.topic_keywords if str(k).strip()]
 
     def copy(self) -> "ScoringConfig":

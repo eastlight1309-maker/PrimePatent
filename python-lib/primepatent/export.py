@@ -19,16 +19,17 @@ COMPONENT_LABEL = {
     "rights.claimScope": "청구범위 강도",
     "rights.remainingTerm": "잔존기간",
     "rights.defenseSignal": "권리유지·방어",
-    "tech.topicFit": "Topic 적합도",
-    "tech.contribution": "핵심 기술기여도",
-    "tech.problemEffect": "문제·효과 중요성",
-    "tech.generality": "기술 범용성",
+    "tech.topicFit": "Topic 적합도(IPURE)",
+    "tech.coreCentrality": "핵심기술 중심성",
+    "tech.claimExpansion": "청구항 확장도",
+    "tech.claimTypeDiversity": "독립항 유형 다양성",
     "market.entry": "주요 시장 진입도",
     "market.applicantPower": "출원인 시장 영향력",
     "market.commercial": "상업화·거래 신호",
-    "market.competitorCoverage": "경쟁사 커버리지",
+    "market.familySize": "패밀리 건수",
+    "impact.competitorCoverage": "경쟁사 커버리지",
     "impact.citation": "연령보정 피인용",
-    "impact.originality": "기술 원천성",
+    "impact.leadership": "기술 선도성",
 }
 
 AREA_LABELS = [(key, "%s(%g)" % (AREA_LABEL[key], AREA_MAX[key])) for key in AREA_ORDER]

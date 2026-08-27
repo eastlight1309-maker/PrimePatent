@@ -17,7 +17,7 @@ from primepatent.peers import percent_rank_inc  # noqa: E402
 from primepatent.records import build_record  # noqa: E402
 from primepatent.scoring.context import AnalysisContext  # noqa: E402
 from primepatent.scoring.engine import score_one, score_records  # noqa: E402
-from primepatent.scoring.tech import topic_fit_score  # noqa: E402
+from primepatent.scoring.tech import ipure_percent  # noqa: E402
 
 AS_OF = date(2026, 8, 25)
 
@@ -39,6 +39,9 @@ def make_record(**overrides):
         "타인 피인용 문헌번호(F1)": "US1;US2", "자기 피인용 문헌번호(F1)": "KR3",
         "인용 문헌 수(B1)": 8, "Current CPC All": "H01L23/00; H01L24/05; H01L25/065",
         "분할출원 여부": "Y", "심판 전체 횟수": 1, "실시권 설정 유무": "유",
+        "IPURE AI Score": 85,
+        "WIPS패밀리 개별국 문헌 수(출원기준)": "KR:2|US:2|JP:1|EP:1|CN:1|TW:1",
+        "WIPS패밀리 문헌 수(출원기준)": 8,
     }
     row.update({k: v for k, v in overrides.items()})
     if "출원번호" in overrides and "등록번호" not in overrides and row.get("등록번호"):
@@ -62,6 +65,9 @@ def make_record(**overrides):
         "cpcAll": {"column": "Current CPC All"},
         "divisionalFlag": {"column": "분할출원 여부"}, "trialCount": {"column": "심판 전체 횟수"},
         "licenseFlag": {"column": "실시권 설정 유무"},
+        "ipureAiScore": {"column": "IPURE AI Score"},
+        "familyCountryDocCounts": {"column": "WIPS패밀리 개별국 문헌 수(출원기준)"},
+        "familyDocCount": {"column": "WIPS패밀리 문헌 수(출원기준)"},
     }
     return build_record(row, mapping, 0)
 
@@ -93,12 +99,11 @@ class PercentileTest(unittest.TestCase):
 
 class SurvivalTest(unittest.TestCase):
     def test_status_scores(self):
-        cases = [("등록(존속)", 8.0), ("심사중", 5.0), ("공개", 5.0),
+        cases = [("등록(존속)", 10.0), ("심사중", 6.0), ("공개", 6.0),
                  ("거절", 0.0), ("취하", 0.0), ("무효", 0.0), ("소멸", 2.0)]
         for legal_status, expected in cases:
             record = make_record(**{"상태정보": legal_status})
             if legal_status != "등록(존속)":
-                # 미등록 상태를 모사하기 위해 등록 서지 제거 (소멸은 등록 후 소멸)
                 if legal_status != "소멸":
                     record["registrationNumber"] = ""
                     record["registrationDate"] = None
@@ -112,18 +117,16 @@ class SurvivalTest(unittest.TestCase):
         record = make_record(**{"최우선출원일": "2007-01-10", "출원일": "2007-01-10"})
         ctx, _ = prepare([record])
         result = score_one(record, None, ctx)
-        # 2007 + 20년 = 2027 → 잔존 1년 미만 → 만료임박
+        # 2007 + 20년 = 2027 → 잔존 2년 이하 → 만료임박 8점
         self.assertEqual(record["_statusCode"], status_mod.GRANTED_EXPIRING)
-        self.assertEqual(component_of(result, "rights.survival")["score"], 6.0)
+        self.assertEqual(component_of(result, "rights.survival")["score"], 8.0)
         self.assertEqual(component_of(result, "rights.remainingTerm")["score"], 1.0)
 
-
-class RightsTest(unittest.TestCase):
     def test_remaining_term_bands(self):
         # 기준일 2026-08-25, 잔존 = 20년 - 경과년수
-        for priority, expected in [("2019-01-10", 4.0),   # 잔존 12.4년
-                                   ("2016-01-10", 3.0),   # 잔존 9.4년
-                                   ("2014-01-10", 2.0),   # 잔존 7.4년
+        for priority, expected in [("2019-01-10", 5.0),   # 잔존 12.4년
+                                   ("2016-01-10", 4.0),   # 잔존 9.4년
+                                   ("2014-01-10", 3.0),   # 잔존 7.4년
                                    ("2010-01-10", 1.0),   # 잔존 3.4년
                                    ("2000-01-10", 0.0)]:  # 만료
             record = make_record(**{"최우선출원일": priority, "출원일": priority})
@@ -135,56 +138,74 @@ class RightsTest(unittest.TestCase):
         record = make_record()
         ctx, _ = prepare([record])
         analysis = analysis_defaults(status="ok")
-        analysis["claimBreadthScore"] = 4.0
+        analysis["claimBreadthScore"] = 3.0
         component = component_of(score_one(record, analysis, ctx), "rights.claimScope")
-        self.assertEqual(component["llmScore"], 4.0)
-        self.assertIsNotNone(component["quantScore"])
+        self.assertEqual(component["llmScore"], 3.0)
+        self.assertEqual(component["llmMax"], 3.0)
+        self.assertEqual(component["quantMax"], 2.0)
         self.assertLessEqual(component["score"], COMPONENT_MAX["rights.claimScope"])
 
     def test_defense_signal_counts_events(self):
         record = make_record()
         ctx, _ = prepare([record])
         component = component_of(score_one(record, None, ctx), "rights.defenseSignal")
-        self.assertEqual(component["score"], 3.0)      # 분할 + 심판 + 실시권
+        self.assertEqual(component["score"], 7.0)      # 분할 2 + 분쟁 5
 
     def test_missing_signals_are_reported_not_scored(self):
         record = make_record()
         record["divisionalFlag"] = None
         record["trialCount"] = None
-        record["licenseFlag"] = None
+        record["litigationCount"] = None
+        record["trialType"] = []
         ctx, _ = prepare([record])
         component = component_of(score_one(record, None, ctx), "rights.defenseSignal")
         self.assertEqual(component["score"], 0.0)
-        self.assertEqual(len(component["detail"]["missingSignals"]), 3)
+        self.assertEqual(len(component["detail"]["missingSignals"]), 2)
         self.assertTrue(component["notes"])
 
+    def test_topic_fit_uses_ipure_score(self):
+        """Primary Topic 적합도는 IPURE AI Score 백분율 × 8 이다."""
+        for raw, expected in [(100, 8.0), (85, 6.8), (50, 4.0), (0, 0.0)]:
+            record = make_record(**{"IPURE AI Score": raw})
+            ctx, _ = prepare([record])
+            component = component_of(score_one(record, None, ctx), "tech.topicFit")
+            self.assertAlmostEqual(component["score"], expected, places=3, msg=str(raw))
+            self.assertEqual(component["source"], "quant")
 
-class TechTest(unittest.TestCase):
-    def test_topic_fit_modes(self):
-        self.assertAlmostEqual(topic_fit_score(100, "softened"), 8.0)
-        self.assertAlmostEqual(topic_fit_score(70, "softened"), 2.0)
-        self.assertAlmostEqual(topic_fit_score(60, "softened"), 0.0)
-        self.assertAlmostEqual(topic_fit_score(50, "softened"), 0.0)
-        self.assertAlmostEqual(topic_fit_score(75, "linear"), 6.0)
+    def test_topic_fit_missing_score_is_reported(self):
+        record = make_record()
+        record["ipureAiScore"] = None
+        ctx, _ = prepare([record])
+        component = component_of(score_one(record, None, ctx), "tech.topicFit")
+        self.assertEqual(component["score"], 0.0)
+        self.assertTrue(component["notes"])
+
+    def test_ipure_percent_scale(self):
+        self.assertAlmostEqual(ipure_percent({"ipureAiScore": 85}, 100.0), 85.0)
+        self.assertAlmostEqual(ipure_percent({"ipureAiScore": 0.85}, 1.0), 85.0)
+        self.assertIsNone(ipure_percent({}, 100.0))
 
     def test_gate_threshold(self):
         record = make_record()
-        ctx, _ = prepare([record])
-        for fit, expected in [(90, True), (70, True), (69.9, False)]:
-            analysis = analysis_defaults(status="ok")
-            analysis["topicFitPercent"] = fit
-            result = score_one(record, analysis, ctx)
+        for fit, expected in [(90, True), (70, True), (69, False)]:
+            record["ipureAiScore"] = fit
+            ctx, _ = prepare([record])
+            result = score_one(record, analysis_defaults(status="ok"), ctx)
             self.assertEqual(result["gate"]["passed"], expected, fit)
+            self.assertEqual(result["gate"]["source"], "IPURE AI Score")
 
-    def test_generality_caps_at_four(self):
+    def test_new_tech_components_come_from_llm(self):
         record = make_record()
-        ctx, _ = prepare([record, make_record(**{"Current CPC All": "H01L1/1"})])
+        ctx, _ = prepare([record])
         analysis = analysis_defaults(status="ok")
-        analysis["generalityScore"] = 4.0
-        component = component_of(score_one(record, analysis, ctx), "tech.generality")
-        self.assertLessEqual(component["score"], 4.0)
-        self.assertLessEqual(component["llmScore"], 3.0)
-        self.assertLessEqual(component["quantScore"], 1.0)
+        analysis.update({"coreCentralityScore": 5.0, "claimExpansionScore": 5.0,
+                         "claimTypeDiversityScore": 3.0})
+        result = score_one(record, analysis, ctx)
+        self.assertEqual(component_of(result, "tech.coreCentrality")["score"], 5.0)
+        self.assertEqual(component_of(result, "tech.claimExpansion")["score"], 5.0)
+        self.assertEqual(component_of(result, "tech.claimTypeDiversity")["score"], 3.0)
+        for key in ("tech.coreCentrality", "tech.claimExpansion", "tech.claimTypeDiversity"):
+            self.assertEqual(component_of(result, key)["source"], "llm")
 
     def test_llm_missing_gives_zero_llm_score(self):
         record = make_record()
@@ -192,15 +213,34 @@ class TechTest(unittest.TestCase):
         result = score_one(record, None, ctx)
         self.assertEqual(result["llmScore"], 0.0)
         self.assertGreater(result["quantScore"], 0.0)
-        self.assertFalse(result["gate"]["passed"])
+        # Topic 적합도는 IPURE 기반이므로 LLM 없이도 점수가 나온다
+        self.assertGreater(component_of(result, "tech.topicFit")["score"], 0.0)
 
-
-class MarketImpactTest(unittest.TestCase):
-    def test_market_entry_capped_at_eight(self):
+    def test_market_entry_consumer_and_supply(self):
         record = make_record()
         ctx, _ = prepare([record])
         component = component_of(score_one(record, None, ctx), "market.entry")
-        self.assertEqual(component["score"], 8.0)
+        # KR,US,JP,EP,CN,TW 전부 진입 → 소비 10 + 공급망 5 = 15 (상한)
+        self.assertEqual(component["score"], 15.0)
+        self.assertEqual(component["detail"]["consumerScore"], 10.0)
+        self.assertEqual(component["detail"]["supplyScore"], 5.0)
+
+    def test_market_entry_partial(self):
+        record = make_record(**{"WIPS패밀리 개별국 문헌 수(출원기준)": "US:1",
+                                "WIPS패밀리 문헌번호(출원기준)": "US16999888",
+                                "국가코드": "US"})
+        ctx, _ = prepare([record])
+        component = component_of(score_one(record, None, ctx), "market.entry")
+        self.assertEqual(component["detail"]["countries"], ["US"])
+        self.assertAlmostEqual(component["detail"]["consumerScore"], 4.2, places=3)
+        self.assertAlmostEqual(component["detail"]["supplyScore"], 0.4, places=3)
+
+    def test_family_size_bands(self):
+        for count, expected in [(9, 2.0), (6, 1.5), (4, 1.0), (3, 0.5), (1, 0.0)]:
+            record = make_record(**{"WIPS패밀리 문헌 수(출원기준)": count})
+            ctx, _ = prepare([record])
+            component = component_of(score_one(record, None, ctx), "market.familySize")
+            self.assertEqual(component["score"], expected, count)
 
     def test_citation_percentile_orders_records(self):
         low = make_record(**{"출원번호": "KR1", "WIPS패밀리 ID": "FA", "피인용 문헌 수(F1)": 0,
@@ -213,19 +253,19 @@ class MarketImpactTest(unittest.TestCase):
                   for r in records]
         self.assertLess(scores[0], scores[1])
         self.assertLess(scores[1], scores[2])
-        self.assertEqual(scores[0], 0.0)   # 피인용 0건은 백분위 0
+        self.assertEqual(scores[0], 0.0)          # 피인용 0건은 백분위 0
+        self.assertEqual(scores[2], 15.0)         # 최상위는 만점
 
-    def test_originality_favors_earlier_priority(self):
+    def test_leadership_favors_earlier_priority(self):
         early = make_record(**{"출원번호": "KR-E", "WIPS패밀리 ID": "FE", "최우선출원일": "2012-01-01"})
         late = make_record(**{"출원번호": "KR-L", "WIPS패밀리 ID": "FL", "최우선출원일": "2024-01-01"})
         ctx, _ = prepare([early, late])
-        early_score = component_of(score_one(early, None, ctx), "impact.originality")
-        late_score = component_of(score_one(late, None, ctx), "impact.originality")
-        self.assertGreater(early_score["detail"]["earlinessScore"],
-                           late_score["detail"]["earlinessScore"])
+        early_score = component_of(score_one(early, None, ctx), "impact.leadership")["score"]
+        late_score = component_of(score_one(late, None, ctx), "impact.leadership")["score"]
+        self.assertGreater(early_score, late_score)
+        self.assertEqual(early_score, 5.0)      # 가장 이른 출원 → 만점
+        self.assertEqual(late_score, 0.0)
 
-
-class TotalsTest(unittest.TestCase):
     def test_component_and_area_maxima(self):
         record = make_record()
         ctx, _ = prepare([record])
@@ -256,7 +296,7 @@ class TotalsTest(unittest.TestCase):
                                        component["max"], places=6, msg=component["key"])
 
     def test_claim_scope_exposes_llm_raw_score(self):
-        """LLM 이 매긴 권리범위 넓이(0~4)가 상세에 그대로 남아야 한다."""
+        """LLM 이 매긴 권리범위 넓이(0~3)가 상세에 그대로 남아야 한다."""
         record = make_record()
         ctx, _ = prepare([record])
         analysis = analysis_defaults(status="ok")
@@ -264,9 +304,8 @@ class TotalsTest(unittest.TestCase):
         component = component_of(score_one(record, analysis, ctx), "rights.claimScope")
         self.assertEqual(component["detail"]["claimBreadthScore"], 2.0)
         self.assertEqual(component["llmScore"], 2.0)
-        self.assertEqual(component["llmMax"], 4.0)
-        self.assertEqual(component["quantMax"], 4.0)
-        # 총점 = 정량 + LLM
+        self.assertEqual(component["llmMax"], 3.0)
+        self.assertEqual(component["quantMax"], 2.0)
         self.assertAlmostEqual(component["score"],
                                component["quantScore"] + component["llmScore"], places=6)
 
@@ -274,8 +313,8 @@ class TotalsTest(unittest.TestCase):
         record = make_record()
         ctx, _ = prepare([record])
         result = score_one(record, analysis_defaults(status="ok"), ctx)
-        self.assertAlmostEqual(result["quantMax"], 52.0, places=6)
-        self.assertAlmostEqual(result["llmMax"], 29.0, places=6)
+        self.assertAlmostEqual(result["quantMax"], 84.0, places=6)
+        self.assertAlmostEqual(result["llmMax"], 16.0, places=6)
 
     def test_result_is_json_serializable_with_iso_dates(self):
         import json
@@ -431,18 +470,16 @@ class LLMPayloadTest(unittest.TestCase):
 
     def test_validate_clamps_out_of_range(self):
         result = validate_analysis({
-            "topicFitPercent": 250, "claimBreadthScore": 9,
-            "coreContributionScore": -3, "generalityScore": "3",
-            "claimAnalysis": {"essentialElementCount": "5", "materialLimitation": 1},
+            "claimBreadthScore": 9, "coreCentralityScore": "4",
+            "claimExpansionScore": -3, "claimTypeDiversityScore": 2.5,
+            "claimAnalysis": {"relatedClaimCount": 4, "totalClaimCount": 5,
+                              "claimTypes": ["장치", "제조방법"], "linkageClaimed": 1},
             "keyFeatures": ["a"] * 20})
-        self.assertEqual(result["topicFitPercent"], 100.0)
-        self.assertEqual(result["claimBreadthScore"], 4.0)
-        self.assertEqual(result["coreContributionScore"], 0.0)
-        self.assertEqual(result["generalityScore"], 3.0)
-        self.assertEqual(result["claimAnalysis"]["essentialElementCount"], 5)
-        self.assertTrue(result["claimAnalysis"]["materialLimitation"])
+        self.assertEqual(result["claimBreadthScore"], 3.0)      # 상한 3
+        self.assertEqual(result["coreCentralityScore"], 4.0)
+        self.assertEqual(result["claimExpansionScore"], 0.0)    # 음수 → 0
+        self.assertEqual(result["claimTypeDiversityScore"], 2.5)
+        self.assertEqual(result["claimAnalysis"]["relatedClaimRatio"], 0.8)
+        self.assertTrue(result["claimAnalysis"]["linkageClaimed"])
         self.assertEqual(len(result["keyFeatures"]), 8)
 
-
-if __name__ == "__main__":
-    unittest.main(verbosity=2)

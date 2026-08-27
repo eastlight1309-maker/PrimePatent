@@ -9,7 +9,8 @@ from datetime import date
 from typing import Any, Dict, List, Optional, Sequence
 
 from .columns import BOOL, DATE, ENTITY_LIST, FIELD_BY_KEY, FLOAT, INT, LIST
-from .parsing import (countries_of, country_of, normalize_country, to_bool,
+from .parsing import (countries_of, country_doc_counts, country_of,
+                      normalize_country, to_bool,
                       to_date, to_entity_list, to_float, to_int, to_list, to_text)
 
 _CORP_SUFFIX_RE = re.compile(
@@ -137,6 +138,9 @@ def _derive(rec: Dict[str, Any]) -> None:
     epo_members = list(rec.get("epoFamilyMembers") or [])
     rec["familyCountriesWips"] = countries_of(wips_members)
     rec["familyCountriesEpo"] = countries_of(epo_members)
+    # 개별국 문헌 수 컬럼이 있으면 국가 커버리지의 1순위 근거로 사용한다.
+    rec["familyCountryCounts"] = country_doc_counts(rec.get("familyCountryDocCounts"))
+    rec["familyDocCountResolved"] = _resolve_family_doc_count(rec)
 
     # --- 청구항 수 보정 ---
     if rec.get("claimCount") is None and rec.get("allClaims"):
@@ -181,6 +185,22 @@ def _derive(rec: Dict[str, Any]) -> None:
     # --- 텍스트 존재 ---
     rec["hasClaimText"] = bool(to_text(rec.get("mainClaim")) or to_text(rec.get("independentClaims")))
     rec["_key"] = rec.get("docNumber") or rec.get("applicationNumber") or f"row-{rec['_rowIndex']}"
+
+
+def _resolve_family_doc_count(rec: Dict[str, Any]) -> int:
+    """패밀리 문헌 수. 컬럼이 없으면 개별국 합계 → 패밀리 문헌번호 개수 순으로 대체."""
+    for key in ("familyDocCount", "epoFamilyDocCount"):
+        value = rec.get(key)
+        if value is not None:
+            try:
+                return max(0, int(value))
+            except (TypeError, ValueError):
+                pass
+    counts = rec.get("familyCountryCounts") or {}
+    if counts:
+        return sum(counts.values())
+    members = rec.get("familyMembers") or rec.get("epoFamilyMembers") or []
+    return len(members)
 
 
 def _cpc_main_group(code: str) -> str:
@@ -232,7 +252,11 @@ def family_key(rec: Dict[str, Any], source: str = "wips") -> str:
 
 
 def family_countries(rec: Dict[str, Any], source: str = "auto") -> List[str]:
-    """패밀리 국가 커버리지(고유 국가). 패밀리 정보가 없으면 자국만."""
+    """패밀리 국가 커버리지(고유 국가). 패밀리 정보가 없으면 자국만.
+
+    'WIPS패밀리 개별국 문헌 수(출원기준)' 컬럼이 있으면 그것을 1순위 근거로 쓴다.
+    """
+    explicit = list((rec.get("familyCountryCounts") or {}).keys())
     wips = rec.get("familyCountriesWips") or []
     epo = rec.get("familyCountriesEpo") or []
     if source == "wips":
@@ -241,7 +265,7 @@ def family_countries(rec: Dict[str, Any], source: str = "auto") -> List[str]:
         countries = epo or wips
     else:  # auto: 넓은 쪽
         countries = wips if len(wips) >= len(epo) else epo
-    countries = list(countries)
+    countries = list(explicit) + [c for c in countries if c not in explicit]
     own = rec.get("country")
     if own and own not in countries:
         countries.append(own)

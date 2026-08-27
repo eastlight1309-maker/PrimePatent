@@ -868,10 +868,17 @@
       areaBox.appendChild(weightField("area-" + key, areaLabels[key] || key,
                                       config.area_weights[key], 0, 3, 0.1));
     });
-    var marketBox = $("cfg-market-weights");
-    marketBox.innerHTML = "";
-    Object.keys(config.market_country_weights).forEach(function (key) {
-      marketBox.appendChild(weightField("mw-" + key, key, config.market_country_weights[key], 0, 8, 0.1));
+    var consumerBox = $("cfg-consumer-weights");
+    consumerBox.innerHTML = "";
+    Object.keys(config.market_consumer_weights).forEach(function (key) {
+      consumerBox.appendChild(
+        weightField("cw-" + key, key, config.market_consumer_weights[key], 0, 15, 0.1));
+    });
+    var supplyBox = $("cfg-supply-weights");
+    supplyBox.innerHTML = "";
+    Object.keys(config.market_supply_weights).forEach(function (key) {
+      supplyBox.appendChild(
+        weightField("sw-" + key, key, config.market_supply_weights[key], 0, 15, 0.1));
     });
   }
 
@@ -896,7 +903,8 @@
     $("cfg-llm-chars").value = config.llm_text_char_limit;
     $("cfg-llm-max-docs").value = config.llm_max_documents;
     $("cfg-gate").value = config.gate_topic_fit_min;
-    $("cfg-fit-mode").value = config.topic_fit_mode;
+    $("cfg-ipure-max").value = config.ipure_score_max;
+    $("cfg-core-tech").value = config.core_technology || "";
     $("cfg-peer-min").value = config.peer_min_size;
     $("cfg-peer-window").value = config.peer_year_window;
     $("cfg-family-source").value = config.family_id_source;
@@ -918,21 +926,25 @@
       llm_text_char_limit: $("cfg-llm-chars").value,
       llm_max_documents: $("cfg-llm-max-docs").value,
       gate_topic_fit_min: $("cfg-gate").value,
-      topic_fit_mode: $("cfg-fit-mode").value,
+      ipure_score_max: $("cfg-ipure-max").value,
+      core_technology: $("cfg-core-tech").value.trim(),
       peer_min_size: $("cfg-peer-min").value,
       peer_year_window: $("cfg-peer-window").value,
       family_id_source: $("cfg-family-source").value,
       representative_country_priority: $("cfg-country-priority").value,
       dedupe_by_family: $("cfg-dedupe").checked,
       rescale_missing_commercial: $("cfg-rescale").checked,
-      area_weights: {}, market_country_weights: {}
+      area_weights: {}, market_consumer_weights: {}, market_supply_weights: {}
     };
     var defaults = state.health.defaultConfig;
     Object.keys(defaults.area_weights).forEach(function (key) {
       config.area_weights[key] = Number($("cfg-area-" + key).value);
     });
-    Object.keys(defaults.market_country_weights).forEach(function (key) {
-      config.market_country_weights[key] = Number($("cfg-mw-" + key).value);
+    Object.keys(defaults.market_consumer_weights).forEach(function (key) {
+      config.market_consumer_weights[key] = Number($("cfg-cw-" + key).value);
+    });
+    Object.keys(defaults.market_supply_weights).forEach(function (key) {
+      config.market_supply_weights[key] = Number($("cfg-sw-" + key).value);
     });
     return config;
   }
@@ -977,6 +989,17 @@
     }
     var config = collectConfig();
     if (!config.topic_name) { toast("분석 주제명을 입력하십시오.", "err"); return; }
+    if (config.llm_enabled && !config.core_technology) {
+      if (!window.confirm(
+          "핵심기술 설명이 입력되지 않았습니다.\n\n" +
+          "청구범위 강도·핵심기술 중심성·청구항 확장도·독립항 유형 다양성은\n" +
+          "이 설명을 기준으로 판정하므로, 없으면 주제명/키워드만으로 추정되어\n" +
+          "정확도가 크게 떨어집니다.\n\n이대로 실행하시겠습니까?")) {
+        setTab("config");
+        $("cfg-core-tech").focus();
+        return;
+      }
+    }
     if (state.applicantState && !state.applicantState.approved) {
       if (!window.confirm(
           "출원인 표준화를 아직 승인하지 않았습니다.\n\n" +

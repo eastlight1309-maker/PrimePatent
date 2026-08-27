@@ -73,6 +73,9 @@ def run_analysis(headers: Sequence[str], rows: Sequence[Dict[str, Any]],
 
     if not rows:
         raise ValueError("분석할 데이터가 없습니다.")
+    if config.llm_enabled and not config.core_technology.strip():
+        warnings.append("핵심기술 설명이 입력되지 않았습니다. 청구범위 강도·핵심기술 중심성·"
+                        "청구항 확장도 판정이 주제명/키워드 기준으로만 이뤄져 정확도가 떨어집니다.")
 
     # ---------------------------------------------------------------- 1. 매핑
     progress("mapping", 0.05, "컬럼 매핑 중")
@@ -133,7 +136,8 @@ def run_analysis(headers: Sequence[str], rows: Sequence[Dict[str, Any]],
                     "LLM 분석점수는 참고용이며 실제 평가로 사용하지 마십시오.")
             analyzer = LLMAnalyzer(
                 client, config.topic_name, config.topic_description, config.topic_keywords,
-                config.llm_text_char_limit, config.llm_max_workers, cache=llm_cache)
+                config.llm_text_char_limit, config.llm_max_workers, cache=llm_cache,
+                core_technology=config.core_technology)
 
             def _llm_progress(done: int, total: int) -> None:
                 ratio = 0.3 + 0.5 * (done / max(1, total))
@@ -149,7 +153,8 @@ def run_analysis(headers: Sequence[str], rows: Sequence[Dict[str, Any]],
     else:
         from .config import COMPONENT_MAX, TOTAL_MAX, mixed_max
         quant_total = sum(mixed_max(key)[0] for key in COMPONENT_MAX)
-        warnings.append("LLM 분석이 비활성화되어 정량점수(%g점 / 총 %g점)만 계산했습니다."
+        warnings.append("LLM 분석이 비활성화되어 정량점수(%g점 / 총 %g점)만 계산했습니다. "
+                        "청구범위 강도·핵심기술 중심성·청구항 확장도·독립항 유형 다양성이 0점 처리됩니다."
                         % (quant_total, TOTAL_MAX))
 
     _check_cancel(cancel_event)

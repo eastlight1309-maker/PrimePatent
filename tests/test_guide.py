@@ -24,7 +24,7 @@ class GuideDataTest(unittest.TestCase):
 
     def test_totals_match_scoring_constants(self):
         self.assertEqual(self.guide["totalMax"], sum(COMPONENT_MAX.values()))
-        self.assertEqual(self.guide["totalMax"], 81.0)
+        self.assertEqual(self.guide["totalMax"], 100.0)
         self.assertAlmostEqual(self.guide["quantMax"] + self.guide["llmMax"],
                                self.guide["totalMax"], places=6)
 
@@ -46,7 +46,7 @@ class GuideDataTest(unittest.TestCase):
 
     def test_area_totals(self):
         totals = {area["key"]: area["max"] for area in self.guide["areas"]}
-        self.assertEqual(totals, {"rights": 23.0, "tech": 26.0, "market": 20.0, "impact": 12.0})
+        self.assertEqual(totals, {"rights": 27.0, "tech": 21.0, "market": 27.0, "impact": 25.0})
 
     def test_every_component_has_explanation(self):
         for area in self.guide["areas"]:
@@ -58,8 +58,14 @@ class GuideDataTest(unittest.TestCase):
         component = [c for area in self.guide["areas"] for c in area["components"]
                      if c["key"] == "market.entry"][0]
         countries = [item["country"] for item in component["weights"]]
-        self.assertEqual(countries[0], "US")        # 가중치가 큰 순서로 선언됨
-        self.assertIn("TW", countries)
+        self.assertEqual(countries[0], "[소비] US")   # 가중치가 큰 순서로 선언됨
+        self.assertTrue(any(c.startswith("[공급망]") for c in countries))
+        consumer = sum(i["weight"] for i in component["weights"]
+                       if i["country"].startswith("[소비]"))
+        supply = sum(i["weight"] for i in component["weights"]
+                     if i["country"].startswith("[공급망]"))
+        self.assertAlmostEqual(consumer, 10.0, places=6)
+        self.assertAlmostEqual(supply, 5.0, places=6)
 
     def test_grades_and_routes_present(self):
         self.assertEqual([g["grade"] for g in self.guide["grades"]], ["S", "A", "B", "C", "D"])
@@ -90,7 +96,7 @@ class GuideApiTest(unittest.TestCase):
         payload = self.client.get("/api/guide").get_json()
         self.assertTrue(payload["ok"])
         guide = payload["guide"]
-        self.assertEqual(guide["totalMax"], 81.0)
+        self.assertEqual(guide["totalMax"], 100.0)
         self.assertEqual(len(guide["areas"]), 4)
         self.assertEqual(sum(len(a["components"]) for a in guide["areas"]), len(COMPONENT_MAX))
 

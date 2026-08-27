@@ -10,6 +10,7 @@ import sys
 HEADERS = [
     "국가코드", "DB종류", "특허/실용 구분", "문헌종류 코드", "발명의 명칭", "요약", "대표청구항",
     "독립청구항[KR,JP,US,CN,EP,IN]", "청구항 수", "독립항 수[KR,JP,US,CN,EP,IN]",
+    "IPURE AI Score",
     "AI 요약[KR,US,JP,CN,EP,PCT,TW]", "해결과제 요약[KR,US,JP,CN,EP,PCT,TW]",
     "해결수단 요약[KR,US,JP,CN,EP,PCT,TW]", "효과 요약[KR,US,JP,CN,EP,PCT,TW]",
     "출원번호", "출원일", "공개번호", "공개일", "등록번호", "등록일",
@@ -18,7 +19,7 @@ HEADERS = [
     "인용 문헌 수(B1)", "인용 문헌번호(B1)", "피인용 문헌 수(F1)", "피인용 문헌번호(F1)",
     "자기 피인용 문헌번호(F1)", "타인 피인용 문헌번호(F1)",
     "WIPS패밀리 ID", "WIPS패밀리 문헌번호(출원기준)", "WIPS패밀리 문헌 수(출원기준)",
-    "WIPS패밀리 국가 수(출원기준)",
+    "WIPS패밀리 국가 수(출원기준)", "WIPS패밀리 개별국 문헌 수(출원기준)",
     "상태정보[KR,JP,US,EP,CN,CA,AU]", "현재권리자[KR,JP,US,CN,CA,AU]",
     "Current CPC All", "Current IPC All",
     "분할출원 여부[KR,US,JP,EP,CN,IN,CA,AU]", "심판 전체 횟수[KR,JP,US,EP]",
@@ -107,6 +108,7 @@ def build_rows(count: int = 90, seed: int = 20260825):
                     " 제10항: 상기 반도체 패키지의 제조 방법.",
                 "청구항 수": random.randint(6, 30),
                 "독립항 수[KR,JP,US,CN,EP,IN]": random.randint(1, 4),
+                "IPURE AI Score": random.choice([95, 88, 82, 76, 71, 68, 55, 42]),
                 "AI 요약[KR,US,JP,CN,EP,PCT,TW]": abstract,
                 "해결과제 요약[KR,US,JP,CN,EP,PCT,TW]":
                     "미세 피치 접합 시 발생하는 정렬 오차와 보이드로 수율이 저하되는 문제",
@@ -132,6 +134,8 @@ def build_rows(count: int = 90, seed: int = 20260825):
                 "WIPS패밀리 문헌번호(출원기준)": ";".join(members),
                 "WIPS패밀리 문헌 수(출원기준)": len(members),
                 "WIPS패밀리 국가 수(출원기준)": len(set(countries)),
+                "WIPS패밀리 개별국 문헌 수(출원기준)":
+                    "|".join("%s:%d" % (c, random.randint(1, 3)) for c in countries),
                 "상태정보[KR,JP,US,EP,CN,CA,AU]": status,
                 "현재권리자[KR,JP,US,CN,CA,AU]": applicant if granted else "",
                 "Current CPC All": cpc,

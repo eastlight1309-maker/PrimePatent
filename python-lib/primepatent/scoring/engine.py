@@ -71,8 +71,11 @@ def score_one(record: Dict[str, Any], analysis: Optional[Dict[str, Any]],
                 quant_max += q_max * weight
                 llm_max += l_max * weight
 
-    fit = float(analysis.get("topicFitPercent") or 0.0)
-    gate_passed = fit >= ctx.config.gate_topic_fit_min
+    # Gate 1 은 이제 LLM 이 아니라 IPURE AI Score 백분율로 판정한다.
+    fit = tech.ipure_percent(record, ctx.config.ipure_score_max)
+    gate_evaluated = fit is not None
+    fit = fit or 0.0
+    gate_passed = gate_evaluated and fit >= ctx.config.gate_topic_fit_min
     llm_ok = analysis.get("status") == "ok"
 
     notes: List[str] = []
@@ -128,7 +131,8 @@ def score_one(record: Dict[str, Any], analysis: Optional[Dict[str, Any]],
             "topicFitPercent": round(fit, 1),
             "threshold": ctx.config.gate_topic_fit_min,
             "passed": gate_passed,
-            "evaluated": llm_ok,
+            "evaluated": gate_evaluated,
+            "source": "IPURE AI Score",
         },
         "llm": {
             "status": analysis.get("status"),

@@ -19,14 +19,14 @@ logger = logging.getLogger("primepatent.llm.analyzer")
 
 _JSON_FENCE_RE = re.compile(r"```(?:json)?\s*(.+?)\s*```", re.S)
 
+# LLM 이 산출하는 점수의 허용 범위 (config.COMPONENT_MAX 의 LLM 배점과 일치)
 SCORE_BOUNDS = {
-    "topicFitPercent": (0.0, 100.0),
-    "claimBreadthScore": (0.0, 4.0),
-    "coreContributionScore": (0.0, 8.0),
-    "problemImportanceScore": (0.0, 3.0),
-    "effectEvidenceScore": (0.0, 3.0),
-    "generalityScore": (0.0, 4.0),
+    "claimBreadthScore": (0.0, 3.0),
+    "coreCentralityScore": (0.0, 5.0),
+    "claimExpansionScore": (0.0, 5.0),
+    "claimTypeDiversityScore": (0.0, 3.0),
 }
+RATIONALE_KEYS = ("centralityRationale", "expansionRationale", "diversityRationale", "rationale")
 
 
 class LLMCache:
@@ -65,21 +65,18 @@ class LLMCache:
 
 def analysis_defaults(status: str = "skipped", message: str = "") -> Dict[str, Any]:
     """LLM 분석을 수행하지 않은 문헌의 기본값(모든 LLM 점수 0)."""
-    return {
-        "topicFitPercent": 0.0,
-        "claimBreadthScore": 0.0,
-        "coreContributionScore": 0.0,
-        "problemImportanceScore": 0.0,
-        "effectEvidenceScore": 0.0,
-        "generalityScore": 0.0,
+    payload = {key: 0.0 for key in SCORE_BOUNDS}
+    payload.update({
         "claimAnalysis": {},
         "keyFeatures": [],
-        "rationale": message,
         "status": status,          # ok | skipped | error
         "provider": "",
         "llmId": "",
         "message": message,
-    }
+    })
+    for key in RATIONALE_KEYS:
+        payload[key] = message
+    return payload
 
 
 def extract_json(text: str) -> Optional[Dict[str, Any]]:
@@ -143,21 +140,37 @@ def validate_analysis(payload: Dict[str, Any]) -> Dict[str, Any]:
     raw_claim = payload.get("claimAnalysis")
     claim: Dict[str, Any] = {}
     if isinstance(raw_claim, dict):
+        elements = raw_claim.get("coreElementsInIndependentClaims")
         claim = {
-            "essentialElementCount": int(_clamp_number(raw_claim.get("essentialElementCount"), 0, 200)),
-            "numericLimitationCount": int(_clamp_number(raw_claim.get("numericLimitationCount"), 0, 200)),
-            "materialLimitation": bool(raw_claim.get("materialLimitation")),
-            "processOrderLimitation": bool(raw_claim.get("processOrderLimitation")),
-            "functionalLanguage": str(raw_claim.get("functionalLanguage") or "").lower()[:10],
-            "multiCategoryIndependentClaims": bool(raw_claim.get("multiCategoryIndependentClaims")),
+            "coreElementsInIndependentClaims":
+                [str(e)[:120] for e in elements][:12] if isinstance(elements, (list, tuple)) else [],
+            "linkageClaimed": bool(raw_claim.get("linkageClaimed")),
+            "independentClaimsWithCore":
+                int(_clamp_number(raw_claim.get("independentClaimsWithCore"), 0, 200)),
+            "relatedClaimCount": int(_clamp_number(raw_claim.get("relatedClaimCount"), 0, 500)),
+            "totalClaimCount": int(_clamp_number(raw_claim.get("totalClaimCount"), 0, 500)),
+            "relatedClaimRatio": round(_clamp_number(raw_claim.get("relatedClaimRatio"), 0, 1), 3),
+            "expansionDependentCount":
+                int(_clamp_number(raw_claim.get("expansionDependentCount"), 0, 500)),
+            "claimTypes": [str(t)[:40] for t in (raw_claim.get("claimTypes") or [])][:10]
+                if isinstance(raw_claim.get("claimTypes"), (list, tuple)) else [],
+            "independentClaimCount":
+                int(_clamp_number(raw_claim.get("independentClaimCount"), 0, 200)),
+            "numericLimitationCount":
+                int(_clamp_number(raw_claim.get("numericLimitationCount"), 0, 200)),
             "designAroundRisk": str(raw_claim.get("designAroundRisk") or "").lower()[:10],
         }
+        # 비율이 비어 있으면 개수로 보정한다(둘 다 있으면 모델 값을 신뢰).
+        if not claim["relatedClaimRatio"] and claim["totalClaimCount"]:
+            claim["relatedClaimRatio"] = round(
+                claim["relatedClaimCount"] / float(claim["totalClaimCount"]), 3)
     result["claimAnalysis"] = claim
 
     features = payload.get("keyFeatures")
     if isinstance(features, (list, tuple)):
         result["keyFeatures"] = [str(f)[:120] for f in features][:8]
-    result["rationale"] = str(payload.get("rationale") or "")[:1200]
+    for key in RATIONALE_KEYS:
+        result[key] = str(payload.get(key) or "")[:1200]
     return result
 
 
@@ -176,19 +189,22 @@ class LLMAnalyzer:
 
     def __init__(self, client: BaseLLMClient, topic_name: str = "", topic_description: str = "",
                  topic_keywords: Optional[Sequence[str]] = None, char_limit: int = 6000,
-                 max_workers: int = 4, cache: Optional[LLMCache] = None):
+                 max_workers: int = 4, cache: Optional[LLMCache] = None,
+                 core_technology: str = ""):
         self.client = client
         self.topic_name = topic_name
         self.topic_description = topic_description
         self.topic_keywords = list(topic_keywords or [])
         self.char_limit = char_limit
+        self.core_technology = core_technology
         self.max_workers = max(1, int(max_workers))
         self.cache = cache if cache is not None else LLMCache()
         self.stats = {"total": 0, "ok": 0, "error": 0, "cached": 0}
 
     @property
     def topic_signature(self) -> str:
-        return "|".join([self.topic_name, self.topic_description, ",".join(self.topic_keywords)])
+        return "|".join([self.topic_name, self.topic_description,
+                         ",".join(self.topic_keywords), self.core_technology])
 
     def analyze_one(self, document: Dict[str, Any]) -> Dict[str, Any]:
         fingerprint = document_fingerprint(document, self.topic_signature, self.client.llm_id)
@@ -198,7 +214,7 @@ class LLMAnalyzer:
             return cached
 
         prompt = build_user_prompt(document, self.topic_name, self.topic_description,
-                                   self.topic_keywords, self.char_limit)
+                                   self.topic_keywords, self.char_limit, self.core_technology)
         result: LLMResult = self.client.complete(SYSTEM_PROMPT, prompt)
         if not result.ok:
             analysis = analysis_defaults(

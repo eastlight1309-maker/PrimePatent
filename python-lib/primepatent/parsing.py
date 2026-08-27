@@ -7,7 +7,7 @@ import math
 import re
 import unicodedata
 from datetime import date, datetime
-from typing import Any, List, Optional
+from typing import Any, Dict, List, Optional
 
 _LIST_SPLIT_RE = re.compile(r"[;|\n\r]+|(?<!\d),(?!\d)|,\s+|\t+")
 _DATE_CLEAN_RE = re.compile(r"[^0-9]")
@@ -246,6 +246,27 @@ def countries_of(values: Any) -> List[str]:
         if code and code not in out:
             out.append(code)
     return out
+
+
+_COUNTRY_COUNT_RE = re.compile(r"([A-Za-z]{2})\s*[:(\[]?\s*(\d+)?")
+
+
+def country_doc_counts(value: Any) -> Dict[str, int]:
+    """'KR:2|US:3|JP:1' / 'KR(2), US(3)' 형태의 개별국 문헌 수를 {국가: 건수} 로.
+
+    건수 표기가 없으면 1건으로 본다(주요 시장 진입도는 유무만 보므로 무방).
+    """
+    result: Dict[str, int] = {}
+    text = to_text(value)
+    if not text:
+        return result
+    for match in _COUNTRY_COUNT_RE.finditer(text):
+        code = match.group(1).upper()
+        if code not in _KNOWN_COUNTRIES:
+            continue
+        count = int(match.group(2)) if match.group(2) else 1
+        result[code] = result.get(code, 0) + max(1, count)
+    return result
 
 
 def normalize_country(value: Any) -> Optional[str]:
