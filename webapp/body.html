@@ -237,7 +237,7 @@
 
     <div class="pp-card">
       <div class="pp-row pp-filters">
-        <input type="search" id="pp-q" class="pp-input" placeholder="문헌번호·명칭·출원인 검색">
+        <input type="search" id="pp-q" class="pp-input" placeholder="출원번호·명칭·출원인 검색">
         <select id="pp-filter-grade" class="pp-input"><option value="">등급 전체</option>
           <option>S</option><option>A</option><option>B</option><option>C</option><option>D</option></select>
         <select id="pp-filter-gate" class="pp-input">
@@ -252,10 +252,12 @@
         <table class="pp-table pp-table-hover" id="pp-result-table">
           <thead><tr>
             <th data-sort="rank">순위</th>
-            <th data-sort="docNumber">문헌번호</th>
+            <th data-sort="applicationNumber">출원번호</th>
+            <th data-sort="applicationDateText">출원일</th>
             <th data-sort="country">국가</th>
             <th data-sort="title">발명의 명칭</th>
             <th data-sort="applicant">출원인</th>
+            <th data-sort="registrationLabel">등록여부</th>
             <th data-sort="statusLabel">상태</th>
             <th data-sort="totalScore">총점</th>
             <th data-sort="grade">등급</th>

@@ -11,6 +11,7 @@ from datetime import date
 from typing import Any, Dict, List, Optional, Sequence
 
 from ..config import AREA_MAX, ScoringConfig, mixed_max
+from .. import status as status_mod
 from ..llm.analyzer import analysis_defaults
 from . import impact, market, rights, tech
 from .common import AreaResult
@@ -21,6 +22,10 @@ EMERGING_RECENT_YEARS = 5
 EMERGING_SPEED_RANK = 0.8
 
 AREA_MODULES = [("rights", rights), ("tech", tech), ("market", market), ("impact", impact)]
+
+
+def _date_text(value) -> str:
+    return value.isoformat()[:10] if hasattr(value, "isoformat") else (str(value or "") or "")
 
 
 def _grade(total: float) -> str:
@@ -92,8 +97,15 @@ def score_one(record: Dict[str, Any], analysis: Optional[Dict[str, Any]],
 
     return jsonable({
         "key": record.get("_key"),
-        "docNumber": record.get("docNumber"),
+        # 출원정보를 기본 식별자로 사용한다.
+        # (docNumber 는 등록 여부에 따라 등록번호/공개번호가 섞이므로 목록 표기에 부적합)
         "applicationNumber": record.get("applicationNumber"),
+        "applicationDateText": _date_text(record.get("applicationDate")),
+        "docNumber": record.get("docNumber"),
+        "publicationNumber": record.get("publicationNumber"),
+        "registrationNumber": record.get("registrationNumber"),
+        "registered": status_mod.is_registered(record),
+        "registrationLabel": status_mod.registration_label(record),
         "country": record.get("country"),
         "title": record.get("title"),
         "applicant": record.get("applicantPrimary"),
@@ -184,7 +196,7 @@ def score_records(records: Sequence[Dict[str, Any]], analyses: Dict[str, Dict[st
                           peer_records=records)
 
     rows = [score_one(record, analyses.get(record.get("_key")), ctx) for record in records]
-    rows.sort(key=lambda r: (-r["totalScore"], r.get("docNumber") or ""))
+    rows.sort(key=lambda r: (-r["totalScore"], r.get("applicationNumber") or ""))
 
     count = len(rows)
     for index, row in enumerate(rows):

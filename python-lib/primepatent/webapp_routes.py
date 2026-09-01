@@ -36,7 +36,9 @@ logger = logging.getLogger("primepatent.webapp")
 
 MAX_ROWS_PER_PAGE = 500
 SLIM_KEYS = (
-    "key", "rank", "docNumber", "applicationNumber", "country", "title", "applicant",
+    "key", "rank", "applicationNumber", "applicationDateText", "docNumber",
+    "publicationNumber", "registrationNumber", "registered", "registrationLabel",
+    "country", "title", "applicant",
     "currentAssignee", "statusLabel", "statusCode", "priorityDate", "priorityYear",
     "applicationDate", "registrationDate", "totalScore", "totalMax", "quantScore",
     "llmScore", "grade", "areaScores", "reviewRoute", "familyCountries",
@@ -131,8 +133,9 @@ def _paginate(rows: List[Dict[str, Any]], args) -> Tuple[List[Dict[str, Any]], i
     if keyword:
         def hit(row: Dict[str, Any]) -> bool:
             blob = " ".join(str(row.get(k) or "") for k in
-                            ("docNumber", "title", "applicant", "currentAssignee",
-                             "applicationNumber", "cpcMain"))
+                            ("applicationNumber", "docNumber", "publicationNumber",
+                             "registrationNumber", "title", "applicant",
+                             "currentAssignee", "cpcMain"))
             return keyword in blob.lower()
         filtered = [r for r in filtered if hit(r)]
     if grade:

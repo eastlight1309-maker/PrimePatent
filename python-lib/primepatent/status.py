@@ -106,6 +106,22 @@ def _expiring_or_alive(record: Dict[str, Any], as_of: date) -> str:
     return GRANTED_ALIVE
 
 
+def is_registered(record: Dict[str, Any]) -> bool:
+    """등록(설정등록) 이력이 있는지.
+
+    등록번호·등록일이 있거나 상태가 등록 계열(존속/만료임박/등록 후 소멸)이면 등록으로 본다.
+    '등록 후 소멸' 도 등록된 적이 있으므로 등록으로 표시하며, 현재 권리 상태는
+    별도의 '상태' 컬럼에서 확인한다.
+    """
+    if to_text(record.get("registrationNumber")) or record.get("registrationDate"):
+        return True
+    return record.get("_statusCode") in (GRANTED_ALIVE, GRANTED_EXPIRING, LAPSED)
+
+
+def registration_label(record: Dict[str, Any]) -> str:
+    return "등록" if is_registered(record) else "미등록"
+
+
 def remaining_term_years(record: Dict[str, Any], as_of: Optional[date] = None) -> Optional[float]:
     """잔존기간(년) 추정. 만료일이 있으면 사용하고, 없으면 최초우선일 + 20년.
 

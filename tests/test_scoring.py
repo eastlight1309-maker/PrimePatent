@@ -449,6 +449,52 @@ class PeerStatsTest(unittest.TestCase):
         self.assertIn("건수", stats["unit"])
 
 
+class OutputIdentityTest(unittest.TestCase):
+    """결과 목록의 식별자는 출원정보여야 하고, 등록여부가 함께 표시되어야 한다."""
+
+    def test_application_info_is_exposed(self):
+        record = make_record()
+        ctx, _ = prepare([record])
+        result = score_one(record, None, ctx)
+        self.assertEqual(result["applicationNumber"], "KR1020190001234")
+        self.assertEqual(result["applicationDateText"], "2019-01-10")
+        # 문헌번호도 추적용으로 남아 있어야 한다(인용 매칭 키)
+        self.assertTrue(result["docNumber"])
+
+    def test_registration_label(self):
+        registered = make_record()
+        ctx, _ = prepare([registered])
+        result = score_one(registered, None, ctx)
+        self.assertTrue(result["registered"])
+        self.assertEqual(result["registrationLabel"], "등록")
+        self.assertEqual(result["registrationNumber"], "KR102000000")
+
+        pending = make_record(**{"출원번호": "KR-P", "상태정보": "공개"})
+        pending["registrationNumber"] = ""
+        pending["registrationDate"] = None
+        ctx2, _ = prepare([pending])
+        result2 = score_one(pending, None, ctx2)
+        self.assertFalse(result2["registered"])
+        self.assertEqual(result2["registrationLabel"], "미등록")
+
+    def test_lapsed_patent_is_still_registered(self):
+        """등록 후 소멸도 '등록' 으로 표기하고, 현재 상태는 상태 컬럼에서 구분한다."""
+        record = make_record(**{"상태정보": "소멸"})
+        ctx, _ = prepare([record])
+        result = score_one(record, None, ctx)
+        self.assertTrue(result["registered"])
+        self.assertEqual(result["statusLabel"], "등록 후 소멸·포기")
+
+    def test_export_uses_application_number(self):
+        from primepatent.export import result_columns
+        columns = result_columns()
+        self.assertEqual(columns[1], "출원번호")
+        self.assertIn("출원일", columns)
+        self.assertIn("등록여부", columns)
+        self.assertIn("등록번호", columns)
+        self.assertIn("문헌번호", columns)      # 추적용으로 유지
+
+
 class DuplicateKeyTest(unittest.TestCase):
     def test_duplicate_doc_numbers_get_unique_keys(self):
         from primepatent.records import build_records

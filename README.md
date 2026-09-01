@@ -132,6 +132,9 @@ python tests/make_sample.py tmp/wips_sample.xlsx 120   # 테스트용 모사 데
 4. **분석 설정** — 주제(Primary Topic)·키워드, LLM 모델, Gate 기준, 비교집단, 국가 가중치
 5. **실행** — 백그라운드 작업으로 실행되며 진행률 표시·취소 가능
 6. **결과** — 요약/분포/정렬/필터/상세 확인, 엑셀·CSV 다운로드.
+   목록의 식별자는 **출원번호·출원일**이고 **등록여부**(등록/미등록)를 함께 표시합니다.
+   문헌번호는 등록 여부에 따라 등록번호/공개번호가 섞이므로 목록에는 쓰지 않고
+   엑셀 내보내기에 추적용으로만 남깁니다.
    상세에는 세부지표 18종의 점수·산출근거와 함께 **비교집단 분포(최소·25%·중앙·75%·최대·평균)** 가
    표시되어, 백분위가 실제로 어느 수준인지 바로 확인할 수 있습니다.
 7. **저장소** — 부서·이름·프로젝트명 입력 후 저장(저장 시각 자동 기록), 이후 재조회·다운로드·삭제
@@ -162,7 +165,7 @@ python tests/make_sample.py tmp/wips_sample.xlsx 120   # 테스트용 모사 데
 ## 6. 테스트
 
 ```bash
-python -m unittest discover -s tests -p "test_*.py" -v   # 단위 + 통합 + DSS 기동 + 회귀 (118건)
+python -m unittest discover -s tests -p "test_*.py" -v   # 단위 + 통합 + DSS 기동 + 회귀 (122건)
 python tests/ui_smoke.py                                 # 브라우저 UI 스모크(Playwright, 서버 실행 필요)
 python tools/build_backend_bundle.py --check             # 번들이 소스와 동기화됐는지 확인
 ```

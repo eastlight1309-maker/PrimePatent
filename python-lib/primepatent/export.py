@@ -38,10 +38,14 @@ COMPONENT_ORDER = [(key, "%s(%g)" % (COMPONENT_LABEL[key], COMPONENT_MAX[key]))
                    for key in COMPONENT_MAX if key in COMPONENT_LABEL]
 
 BASE_COLUMNS = [
-    ("rank", "순위"), ("docNumber", "문헌번호"), ("country", "국가"),
-    ("title", "발명의 명칭"), ("applicant", "출원인"), ("currentAssignee", "현재권리자"),
+    ("rank", "순위"),
+    ("applicationNumber", "출원번호"), ("applicationDateText", "출원일"),
+    ("country", "국가"), ("title", "발명의 명칭"),
+    ("applicant", "출원인"), ("currentAssignee", "현재권리자"),
+    ("registrationLabel", "등록여부"), ("registrationNumber", "등록번호"),
     ("statusLabel", "법적상태"), ("priorityDate", "최초우선일"),
-    ("applicationDate", "출원일"), ("registrationDate", "등록일"),
+    ("publicationNumber", "공개번호"), ("docNumber", "문헌번호"),
+    ("registrationDate", "등록일"),
     ("totalScore", "총점(%g)" % TOTAL_MAX), ("grade", "등급"),
     ("quantScore", "정량점수"), ("llmScore", "LLM점수"),
 ]

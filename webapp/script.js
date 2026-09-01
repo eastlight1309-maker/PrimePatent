@@ -1229,19 +1229,28 @@
     if (!rows || !rows.length) {
       var tr = el("tr");
       var td = el("td", "pp-empty", "조건에 맞는 문헌이 없습니다.");
-      td.colSpan = 15;
+      td.colSpan = 17;
       tr.appendChild(td); tbody.appendChild(tr);
       return;
     }
     rows.forEach(function (row) {
       var tr = el("tr");
       tr.appendChild(el("td", "pp-num", row.rank));
-      tr.appendChild(el("td", null, row.docNumber));
+      var appCell = el("td", null, row.applicationNumber);
+      appCell.title = "문헌번호: " + esc(row.docNumber);
+      tr.appendChild(appCell);
+      tr.appendChild(el("td", null, row.applicationDateText));
       tr.appendChild(el("td", null, row.country));
       var title = el("td", "pp-title-cell", row.title);
       title.title = esc(row.title);
       tr.appendChild(title);
       tr.appendChild(el("td", null, row.applicant));
+      var regCell = el("td");
+      var regBadge = el("span", "pp-badge " + (row.registered ? "pp-badge-ok" : "pp-badge-muted"),
+                        row.registrationLabel || (row.registered ? "등록" : "미등록"));
+      if (row.registrationNumber) regBadge.title = "등록번호: " + esc(row.registrationNumber);
+      regCell.appendChild(regBadge);
+      tr.appendChild(regCell);
       tr.appendChild(el("td", null, row.statusLabel));
       tr.appendChild(el("td", "pp-num", num(row.totalScore, 1)));
       var grade = el("td");
@@ -1275,16 +1284,24 @@
     if (!base) return;
     request(base + "/row/" + encodeURIComponent(key)).then(function (data) {
       var row = data.row;
-      $("pp-detail-title").textContent = esc(row.docNumber) + " · " + num(row.totalScore, 1) + "점 (" + esc(row.grade) + ")";
+      $("pp-detail-title").textContent =
+        esc(row.applicationNumber) + " · " + num(row.totalScore, 1) + "점 (" + esc(row.grade) + ")";
       var body = $("pp-detail-body");
       body.innerHTML = "";
 
       body.appendChild(el("h3", null, "서지"));
       var info = el("div", "pp-help");
-      info.textContent = [row.title, row.applicant, row.statusLabel,
-                          "최초우선일 " + esc(row.priorityDate),
-                          "패밀리 국가 " + (row.familyCountries || []).join(", ")]
-        .filter(Boolean).join(" · ");
+      info.textContent = [
+        row.title, row.applicant,
+        "출원번호 " + esc(row.applicationNumber),
+        row.applicationDateText ? "출원일 " + esc(row.applicationDateText) : "",
+        (row.registrationLabel || "") +
+          (row.registrationNumber ? " (" + esc(row.registrationNumber) + ")" : ""),
+        row.statusLabel,
+        row.publicationNumber ? "공개번호 " + esc(row.publicationNumber) : "",
+        "최초우선일 " + esc(row.priorityDate),
+        "패밀리 국가 " + (row.familyCountries || []).join(", ")
+      ].filter(Boolean).join(" · ");
       body.appendChild(info);
       if (row.detailLink) {
         var link = el("a", "pp-help", "윈텔립스 상세보기 열기");
