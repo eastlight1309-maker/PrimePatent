@@ -12,7 +12,7 @@ from typing import Any, Dict, List, Optional
 
 from . import status as status_mod
 from .config import ScoringConfig
-from .records import family_countries, family_key
+from .records import family_country_sources, family_key
 from .parsing import to_text
 
 
@@ -36,10 +36,12 @@ def build_families(records: List[Dict[str, Any]], config: ScoringConfig,
     for key, members in groups.items():
         representative = max(members, key=lambda r: _rep_sort_key(r, priority))
         countries: List[str] = []
+        country_sources: Dict[str, str] = {}
         for member in members:
-            for country in family_countries(member, config.family_country_source):
+            for country, origin in family_country_sources(member, config.family_country_source):
                 if country and country not in countries:
                     countries.append(country)
+                    country_sources[country] = origin
 
         registered = sorted({
             member.get("country") for member in members
@@ -54,6 +56,7 @@ def build_families(records: List[Dict[str, Any]], config: ScoringConfig,
             "memberCount": len(members),
             "members": [m.get("_key") for m in members],
             "countries": countries,
+            "countrySources": country_sources,
             "countryCount": len(countries),
             "registeredCountries": registered,
             "registeredCountryCount": len(registered),

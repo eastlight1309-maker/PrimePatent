@@ -13,6 +13,7 @@
 
 | 규칙 | 구현 |
 |---|---|
+| 국가 커버리지 | `records.family_country_sources()` — 개별국 문헌 수 → 패밀리 문헌번호 → 자국 순. **지정국 코드는 제외**(실제 출원이 아님) |
 | 출원인 표준화 | `applicants.cluster_applicants()` — 사용자가 **승인**한 표준명만 `records.build_records(applicant_map=...)` 로 반영. 승인 전에는 원본 표기 사용 |
 | 패밀리 대표문헌 | `family.build_families()` — 상태 우선순위 → 국가 우선순위 → 청구항 수 → 피인용 → 이른 우선일 |
 | 비교집단 | `peers.PeerIndex.rank()` — `Topic+연도` → `Topic+연도±N` → `Topic` → 전체, 표본 부족 시 중립 0.5 |

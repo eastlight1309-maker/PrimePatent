@@ -165,7 +165,7 @@ python tests/make_sample.py tmp/wips_sample.xlsx 120   # 테스트용 모사 데
 ## 6. 테스트
 
 ```bash
-python -m unittest discover -s tests -p "test_*.py" -v   # 단위 + 통합 + DSS 기동 + 회귀 (122건)
+python -m unittest discover -s tests -p "test_*.py" -v   # 단위 + 통합 + DSS 기동 + 회귀 (131건)
 python tests/ui_smoke.py                                 # 브라우저 UI 스모크(Playwright, 서버 실행 필요)
 python tools/build_backend_bundle.py --check             # 번들이 소스와 동기화됐는지 확인
 ```
@@ -262,3 +262,7 @@ DSS 는 프로젝트를 내부 Git 으로 버전 관리하며, **웹앱을 저�
 - 분석 결과는 메모리에 최근 3건만 유지됩니다. 그 이후에는 저장소에 저장한 결과를 불러오거나
   다시 실행해야 합니다(대용량 결과가 쌓여 백엔드가 메모리 부족으로 죽는 것을 막기 위함).
 - 내보내기 파일의 셀은 `=`, `+`, `-`, `@` 로 시작하면 텍스트로 고정됩니다(엑셀 수식 실행 방지).
+- **주요 시장 진입도는 실제 출원이 있는 국가만 셉니다.** PCT/EPC 지정국은 제외되며,
+  각 국가의 근거 컬럼은 결과 상세의 `countrySources` 에서 확인할 수 있습니다.
+- 엑셀 내보내기에는 **`LLM판단근거` 시트**가 포함되어, 지표별 LLM 점수와 그 판단 근거
+  (중심성/확장도/유형 다양성 근거, 핵심 구성요소, 관련 청구항 비율 등)를 한 번에 검토할 수 있습니다.

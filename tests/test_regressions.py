@@ -144,6 +144,139 @@ class LLMCacheTest(unittest.TestCase):
         self.assertEqual(cache.get("k")["score"], 1)
 
 
+class MarketEntryTest(unittest.TestCase):
+    """주요 시장 진입도는 '실제 출원이 있는 국가' 만 세야 한다."""
+
+    MAP = {k: {"column": k} for k in
+           ["applicationNumber", "country", "legalStatus", "familyMembers",
+            "familyCountryDocCounts", "designatedStates"]}
+
+    def _entry(self, row):
+        from primepatent.scoring.context import AnalysisContext
+        from primepatent.scoring.engine import score_one
+        config = ScoringConfig(peer_min_size=2)
+        record = build_records([row], self.MAP)[0]
+        build_families([record], config, AS_OF)
+        ctx = AnalysisContext([record], config, AS_OF, peer_records=[record])
+        return [c for area in score_one(record, None, ctx)["areas"].values()
+                for c in area["components"] if c["key"] == "market.entry"][0]
+
+    def test_designated_states_do_not_count_as_filings(self):
+        """PCT/EPC 지정국은 '출원 가능한 나라' 목록일 뿐 실제 출원이 아니다.
+
+        회귀: 지정국을 포함하면 US 단독 출원 1건이 만점(15점)을 받았다.
+        """
+        component = self._entry({
+            "applicationNumber": "US10475776", "country": "US", "legalStatus": "등록(존속)",
+            "familyMembers": "US10475776", "familyCountryDocCounts": "US:1",
+            "designatedStates": "AE;AT;AU;CN;DE;EP;JP;KR;GB;FR;TW"})
+        self.assertEqual(component["detail"]["countries"], ["US"])
+        self.assertAlmostEqual(component["score"], 4.6, places=3)   # 소비 4.2 + 공급망 0.4
+
+    def test_full_score_requires_all_weighted_countries(self):
+        component = self._entry({
+            "applicationNumber": "KR1", "country": "KR", "legalStatus": "등록(존속)",
+            "familyMembers": "KR1;US2;JP3;CN4;EP5;TW6",
+            "familyCountryDocCounts": "KR:2|US:3|JP:1|CN:1|EP:1|TW:1", "designatedStates": ""})
+        self.assertEqual(component["score"], 15.0)
+
+    def test_missing_ep_cannot_reach_full_score(self):
+        """EP 가 없으면 소비시장 2.1점을 받을 수 없으므로 만점이 불가능하다."""
+        component = self._entry({
+            "applicationNumber": "KR1", "country": "KR", "legalStatus": "등록(존속)",
+            "familyMembers": "KR1;US2;JP3;CN4;TW5",
+            "familyCountryDocCounts": "KR:2|US:3|JP:1|CN:1|TW:1", "designatedStates": ""})
+        self.assertNotIn("EP", component["detail"]["countries"])
+        self.assertAlmostEqual(component["score"], 12.9, places=3)
+        self.assertLess(component["score"], 15.0)
+
+    def test_country_sources_are_reported(self):
+        component = self._entry({
+            "applicationNumber": "KR1", "country": "KR", "legalStatus": "등록(존속)",
+            "familyMembers": "KR1;US2", "familyCountryDocCounts": "KR:2|US:3",
+            "designatedStates": ""})
+        sources = component["detail"]["countrySources"]
+        self.assertEqual(sources["KR"], "개별국 문헌 수")
+        self.assertEqual(sources["US"], "개별국 문헌 수")
+
+
+class CountryParserTest(unittest.TestCase):
+    """국가코드는 독립 토큰일 때만 인식해야 한다."""
+
+    def test_normal_formats(self):
+        from primepatent.parsing import country_doc_counts
+        self.assertEqual(country_doc_counts("KR:2|US:3|JP:1"), {"KR": 2, "US": 3, "JP": 1})
+        self.assertEqual(country_doc_counts("KR(2), US(3)"), {"KR": 2, "US": 3})
+        self.assertEqual(country_doc_counts("KR;US;JP"), {"KR": 1, "US": 1, "JP": 1})
+        self.assertEqual(country_doc_counts("kr:2|us:3"), {"KR": 2, "US": 3})
+
+    def test_words_do_not_produce_phantom_countries(self):
+        """회귀: EPO→EP, Europe→RO, SEPTEMBER→SE/PT/BE 로 오인되어 점수가 부풀려졌다."""
+        from primepatent.parsing import country_doc_counts
+        self.assertEqual(country_doc_counts("EPO패밀리 기준 KR:2 US:3"), {"KR": 2, "US": 3})
+        self.assertNotIn("EP", country_doc_counts("EPO패밀리 기준"))
+        self.assertEqual(country_doc_counts("US:3 (Europe 미출원)"), {"US": 3})
+        self.assertEqual(country_doc_counts("SEPTEMBER"), {})
+        self.assertEqual(country_doc_counts("DEPT KR:1"), {"KR": 1})
+
+    def test_blank(self):
+        from primepatent.parsing import country_doc_counts
+        self.assertEqual(country_doc_counts(""), {})
+        self.assertEqual(country_doc_counts(None), {})
+
+
+class LlmRationaleExportTest(unittest.TestCase):
+    """LLM 판단 근거가 엑셀에 함께 나와야 한다."""
+
+    def _payload(self):
+        row = {
+            "rank": 1, "applicationNumber": "KR1", "title": "테스트", "docNumber": "KR1",
+            "totalScore": 50.0, "grade": "C", "areaScores": {}, "gate": {}, "notes": [],
+            "familyCountries": [], "registrationLabel": "등록",
+            "areas": {"tech": {"components": [
+                {"key": "tech.coreCentrality", "label": "중심성", "score": 4.0, "max": 5.0,
+                 "llmScore": 4.0, "detail": {}, "notes": []}]}},
+            "llm": {"status": "ok", "provider": "dataiku",
+                    "rationale": "종합 근거입니다",
+                    "centralityRationale": "핵심 구성이 독립항에 있습니다",
+                    "expansionRationale": "관련 청구항 비율 60%",
+                    "diversityRationale": "장치와 제조방법 2개 유형",
+                    "keyFeatures": ["하이브리드 본딩"],
+                    "claimAnalysis": {"coreElementsInIndependentClaims": ["구리 패드"],
+                                      "linkageClaimed": True, "relatedClaimCount": 6,
+                                      "totalClaimCount": 10, "relatedClaimRatio": 0.6,
+                                      "expansionDependentCount": 4,
+                                      "claimTypes": ["장치", "제조방법"],
+                                      "designAroundRisk": "low"}},
+        }
+        return {"rows": [row], "summary": {}, "config": {}, "warnings": [], "mapping": {}}
+
+    def test_score_sheet_has_rationale_columns(self):
+        from primepatent.export import flatten_row, result_columns
+        columns = result_columns()
+        for label in ("중심성 근거", "확장도 근거", "유형 다양성 근거", "LLM 종합근거",
+                      "독립항 내 핵심 구성요소", "독립항 유형", "관련 청구항 비율"):
+            self.assertIn(label, columns)
+        flat = flatten_row(self._payload()["rows"][0])
+        self.assertEqual(flat["중심성 근거"], "핵심 구성이 독립항에 있습니다")
+        self.assertEqual(flat["독립항 유형"], "장치, 제조방법")
+        self.assertEqual(flat["연결관계 청구"], "Y")
+
+    def test_dedicated_llm_sheet(self):
+        import openpyxl
+        from primepatent.export import export_bytes
+        book = openpyxl.load_workbook(io.BytesIO(export_bytes(self._payload(), "xlsx")))
+        self.assertIn("LLM판단근거", book.sheetnames)
+        sheet = book["LLM판단근거"]
+        header = [c.value for c in sheet[1]]
+        self.assertIn("중심성 근거", header)
+        self.assertIn("핵심기술 중심성", header)
+        values = [c.value for c in sheet[2]]
+        self.assertEqual(values[header.index("핵심기술 중심성")], 4.0)
+        self.assertEqual(values[header.index("중심성 근거")], "핵심 구성이 독립항에 있습니다")
+        self.assertEqual(values[header.index("관련 청구항 비율")], 0.6)
+
+
 class ExportInjectionTest(unittest.TestCase):
     """업로드 데이터가 엑셀 수식으로 실행되면 안 된다."""
 

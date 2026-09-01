@@ -252,29 +252,48 @@ def family_key(rec: Dict[str, Any], source: str = "wips") -> str:
 
 
 def family_countries(rec: Dict[str, Any], source: str = "auto") -> List[str]:
-    """패밀리 국가 커버리지(고유 국가). 패밀리 정보가 없으면 자국만.
+    """패밀리 국가 커버리지(실제 출원이 존재하는 고유 국가).
 
-    'WIPS패밀리 개별국 문헌 수(출원기준)' 컬럼이 있으면 그것을 1순위 근거로 쓴다.
+    근거 우선순위
+      1) 'WIPS패밀리 개별국 문헌 수(출원기준)' 컬럼
+      2) 패밀리 문헌번호에서 추출한 국가코드
+      3) 자국(해당 문헌의 국가코드)
+
+    **지정국 코드(PCT 지정국 / EPC 지정국)는 포함하지 않는다.**
+    지정국은 '출원할 수 있는 나라' 목록일 뿐 실제 출원이 아니어서,
+    이를 포함하면 PCT 출원 1건이 수십 개국에 출원한 것처럼 계산되어
+    주요 시장 진입도가 만점으로 부풀려진다.
     """
+    return [country for country, _source in family_country_sources(rec, source)]
+
+
+def family_country_sources(rec: Dict[str, Any], source: str = "auto"):
+    """(국가, 근거) 목록. 점수 근거를 화면에서 추적할 수 있게 한다."""
     explicit = list((rec.get("familyCountryCounts") or {}).keys())
     wips = rec.get("familyCountriesWips") or []
     epo = rec.get("familyCountriesEpo") or []
     if source == "wips":
-        countries = wips or epo
+        members = wips or epo
     elif source == "epo":
-        countries = epo or wips
+        members = epo or wips
     else:  # auto: 넓은 쪽
-        countries = wips if len(wips) >= len(epo) else epo
-    countries = list(explicit) + [c for c in countries if c not in explicit]
+        members = wips if len(wips) >= len(epo) else epo
+
+    pairs: List = []
+    seen = set()
+    for country in explicit:
+        if country not in seen:
+            seen.add(country)
+            pairs.append((country, "개별국 문헌 수"))
+    for country in members:
+        if country not in seen:
+            seen.add(country)
+            pairs.append((country, "패밀리 문헌번호"))
     own = rec.get("country")
-    if own and own not in countries:
-        countries.append(own)
-    designated = rec.get("designatedStates") or []
-    for item in designated:
-        code = normalize_country(item)
-        if code and code not in countries:
-            countries.append(code)
-    return countries
+    if own and own not in seen:
+        seen.add(own)
+        pairs.append((own, "자국"))
+    return pairs
 
 
 def build_records(rows: Sequence[Dict[str, Any]], mapping: Dict[str, Dict],

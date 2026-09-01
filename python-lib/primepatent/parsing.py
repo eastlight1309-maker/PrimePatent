@@ -248,7 +248,10 @@ def countries_of(values: Any) -> List[str]:
     return out
 
 
-_COUNTRY_COUNT_RE = re.compile(r"([A-Za-z]{2})\s*[:(\[]?\s*(\d+)?")
+# 국가코드는 반드시 '독립된 두 글자 토큰' 이어야 한다.
+# 경계를 강제하지 않으면 EPO→EP, Europe→RO, SEPTEMBER→SE/PT/BE 처럼
+# 단어 안의 두 글자가 국가로 오인되어 시장 진입도가 부풀려진다.
+_COUNTRY_COUNT_RE = re.compile(r"(?<![A-Z0-9])([A-Z]{2})(?![A-Z])\s*[:(\[=-]?\s*(\d+)?")
 
 
 def country_doc_counts(value: Any) -> Dict[str, int]:
@@ -257,11 +260,11 @@ def country_doc_counts(value: Any) -> Dict[str, int]:
     건수 표기가 없으면 1건으로 본다(주요 시장 진입도는 유무만 보므로 무방).
     """
     result: Dict[str, int] = {}
-    text = to_text(value)
+    text = to_text(value).upper()
     if not text:
         return result
     for match in _COUNTRY_COUNT_RE.finditer(text):
-        code = match.group(1).upper()
+        code = match.group(1)
         if code not in _KNOWN_COUNTRIES:
             continue
         count = int(match.group(2)) if match.group(2) else 1

@@ -18,6 +18,7 @@ def main():
         browser = p.chromium.launch(executable_path="/opt/pw-browsers/chromium-1194/chrome-linux/chrome")
         page = browser.new_page(viewport={"width": 1500, "height": 1000})
         page.on("console", lambda m: errors.append(m.text) if m.type == "error" else None)
+        page.on("dialog", lambda dialog: dialog.accept())
         page.on("pageerror", lambda e: errors.append("pageerror: %s" % e))
         page.goto(URL, wait_until="networkidle")
         print("1) 초기 로드:", page.title(), "|", page.text_content("#pp-storage-badge"))
@@ -52,6 +53,10 @@ def main():
         page.click('.pp-tab[data-tab="config"]')
         page.fill("#cfg-topic-name", "첨단 반도체 패키징")
         page.fill("#cfg-topic-keywords", "하이브리드 본딩, TSV, 팬아웃, 미세 피치")
+        # 핵심기술 설명을 비우면 실행 시 확인 창이 떠 분석이 시작되지 않는다.
+        page.fill("#cfg-core-tech",
+                  "하이브리드 본딩을 이용한 미세 피치 칩 접합 구조. "
+                  "핵심 구성요소: 구리 패드, 절연층, 5㎛ 이하 접합 피치")
         page.fill("#cfg-peer-min", "10")
         page.fill("#cfg-as-of", "2026-08-25")
         page.screenshot(path=os.path.join(SHOTS, "03_config.png"))

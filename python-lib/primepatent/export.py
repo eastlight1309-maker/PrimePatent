@@ -55,7 +55,18 @@ TAIL_COLUMNS = [
     ("familyCountries", "패밀리 국가"), ("familyMemberCount", "패밀리 문헌수"),
     ("forwardCitations", "피인용 수"), ("backwardCitations", "인용 수"),
     ("claimCount", "청구항 수"), ("independentClaimCount", "독립항 수"),
-    ("cpcMain", "CPC Main"), ("llmProvider", "LLM 제공자"), ("llmRationale", "LLM 판단근거"),
+    ("cpcMain", "CPC Main"),
+    # --- LLM 판단 근거 ---
+    ("llmProvider", "LLM 제공자"), ("llmStatus", "LLM 상태"),
+    ("llmRationale", "LLM 종합근거"),
+    ("centralityRationale", "중심성 근거"), ("expansionRationale", "확장도 근거"),
+    ("diversityRationale", "유형 다양성 근거"),
+    ("coreElements", "독립항 내 핵심 구성요소"), ("linkageClaimed", "연결관계 청구"),
+    ("independentClaimsWithCore", "핵심기술 포함 독립항 수"),
+    ("relatedClaimCount", "핵심기술 관련 청구항 수"), ("relatedClaimRatio", "관련 청구항 비율"),
+    ("expansionDependentCount", "확장 종속항 수"), ("claimTypes", "독립항 유형"),
+    ("numericLimitationCount", "수치 한정 개수"), ("designAroundRisk", "회피 가능성"),
+    ("keyFeatures", "LLM 핵심 특징"),
     ("notes", "주의사항"), ("detailLink", "상세보기 링크"),
 ]
 
@@ -100,8 +111,24 @@ def flatten_row(row: Dict[str, Any]) -> Dict[str, Any]:
     flat["청구항 수"] = row.get("claimCount")
     flat["독립항 수"] = row.get("independentClaimCount")
     flat["CPC Main"] = row.get("cpcMain")
+    claim_analysis = llm.get("claimAnalysis") or {}
     flat["LLM 제공자"] = llm.get("provider")
-    flat["LLM 판단근거"] = llm.get("rationale")
+    flat["LLM 상태"] = llm.get("status")
+    flat["LLM 종합근거"] = llm.get("rationale")
+    flat["중심성 근거"] = llm.get("centralityRationale")
+    flat["확장도 근거"] = llm.get("expansionRationale")
+    flat["유형 다양성 근거"] = llm.get("diversityRationale")
+    flat["독립항 내 핵심 구성요소"] = ", ".join(
+        claim_analysis.get("coreElementsInIndependentClaims") or [])
+    flat["연결관계 청구"] = _yn(claim_analysis.get("linkageClaimed"))
+    flat["핵심기술 포함 독립항 수"] = claim_analysis.get("independentClaimsWithCore")
+    flat["핵심기술 관련 청구항 수"] = claim_analysis.get("relatedClaimCount")
+    flat["관련 청구항 비율"] = claim_analysis.get("relatedClaimRatio")
+    flat["확장 종속항 수"] = claim_analysis.get("expansionDependentCount")
+    flat["독립항 유형"] = ", ".join(claim_analysis.get("claimTypes") or [])
+    flat["수치 한정 개수"] = claim_analysis.get("numericLimitationCount")
+    flat["회피 가능성"] = claim_analysis.get("designAroundRisk")
+    flat["LLM 핵심 특징"] = ", ".join(llm.get("keyFeatures") or [])
     flat["주의사항"] = " / ".join(row.get("notes") or [])[:2000]
     flat["상세보기 링크"] = row.get("detailLink")
     return {key: safe_cell(value) for key, value in flat.items()}
@@ -146,11 +173,14 @@ def to_excel_bytes(payload: Dict[str, Any]) -> bytes:
     detail_frame = pd.DataFrame(_detail_rows(payload),
                                 columns=["문헌번호", "세부지표", "점수", "배점", "산출근거", "주의"])
 
+    llm_frame = pd.DataFrame(_llm_rows(payload), columns=LLM_SHEET_COLUMNS)
+
     buffer = io.BytesIO()
     try:
         with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
             summary_frame.to_excel(writer, sheet_name="요약", index=False)
             frame.to_excel(writer, sheet_name="스코어", index=False)
+            llm_frame.to_excel(writer, sheet_name="LLM판단근거", index=False)
             detail_frame.to_excel(writer, sheet_name="세부지표", index=False)
             mapping_frame.to_excel(writer, sheet_name="컬럼매핑", index=False)
             _autofit(writer)
@@ -175,6 +205,48 @@ def _autofit(writer) -> None:
             sheet.freeze_panes = "A2"
     except Exception as exc:  # 서식은 실패해도 데이터는 유지
         logger.debug("열 너비 조정 생략: %s", exc)
+
+
+LLM_SHEET_COLUMNS = [
+    "순위", "출원번호", "발명의 명칭", "LLM 상태", "LLM 제공자",
+    "청구범위 강도(LLM)", "핵심기술 중심성", "청구항 확장도", "독립항 유형 다양성",
+    "중심성 근거", "확장도 근거", "유형 다양성 근거", "종합 근거",
+    "독립항 내 핵심 구성요소", "연결관계 청구", "핵심기술 포함 독립항 수",
+    "핵심기술 관련 청구항 수", "전체 청구항 수", "관련 청구항 비율", "확장 종속항 수",
+    "독립항 유형", "수치 한정 개수", "회피 가능성", "LLM 핵심 특징",
+]
+
+
+def _llm_rows(payload: Dict[str, Any]) -> List[List[Any]]:
+    """LLM 이 판정한 점수와 그 근거만 모은 시트.
+
+    어떤 근거로 몇 점이 나왔는지 한 화면에서 검토할 수 있게 한다.
+    """
+    rows: List[List[Any]] = []
+    for row in payload.get("rows") or []:
+        llm = row.get("llm") or {}
+        claim = llm.get("claimAnalysis") or {}
+        scores = {}
+        for area in (row.get("areas") or {}).values():
+            for component in area.get("components", []):
+                if component.get("llmScore") is not None:
+                    scores[component["key"]] = component["llmScore"]
+        rows.append([
+            row.get("rank"), safe_cell(row.get("applicationNumber")), safe_cell(row.get("title")),
+            llm.get("status"), llm.get("provider"),
+            scores.get("rights.claimScope"), scores.get("tech.coreCentrality"),
+            scores.get("tech.claimExpansion"), scores.get("tech.claimTypeDiversity"),
+            safe_cell(llm.get("centralityRationale")), safe_cell(llm.get("expansionRationale")),
+            safe_cell(llm.get("diversityRationale")), safe_cell(llm.get("rationale")),
+            safe_cell(", ".join(claim.get("coreElementsInIndependentClaims") or [])),
+            _yn(claim.get("linkageClaimed")), claim.get("independentClaimsWithCore"),
+            claim.get("relatedClaimCount"), claim.get("totalClaimCount"),
+            claim.get("relatedClaimRatio"), claim.get("expansionDependentCount"),
+            safe_cell(", ".join(claim.get("claimTypes") or [])),
+            claim.get("numericLimitationCount"), claim.get("designAroundRisk"),
+            safe_cell(", ".join(llm.get("keyFeatures") or [])),
+        ])
+    return rows
 
 
 def _summary_rows(payload: Dict[str, Any]) -> List[List[Any]]:
@@ -232,6 +304,12 @@ def _detail_rows(payload: Dict[str, Any], limit: int = 300) -> List[List[Any]]:
                              safe_cell(brief[:500]),
                              safe_cell(" / ".join(component.get("notes") or [])[:300])])
     return rows
+
+
+def _yn(value: Any) -> str:
+    if value is None:
+        return ""
+    return "Y" if value else "N"
 
 
 def _brief(value: Any) -> str:

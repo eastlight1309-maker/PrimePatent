@@ -57,7 +57,8 @@ def _market_entry(record: Dict[str, Any], ctx: AnalysisContext) -> Component:
         detail={"countries": countries,
                 "consumerCountries": consumer, "consumerScore": round(consumer_score, 3),
                 "supplyCountries": supply, "supplyScore": round(supply_score, 3),
-                "countryDocCounts": record.get("familyCountryCounts") or {}},
+                "countryDocCounts": record.get("familyCountryCounts") or {},
+                "countrySources": family.get("countrySources") or {}},
         notes=notes)
 
 
