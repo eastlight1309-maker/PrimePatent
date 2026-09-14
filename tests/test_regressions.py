@@ -70,14 +70,18 @@ class PeerPopulationTest(unittest.TestCase):
 
     def test_score_records_does_not_let_one_family_dominate(self):
         scored = score_records(self.targets, {}, self.config, AS_OF, population=self.records)
-        citation = {}
         for row in scored["rows"]:
-            component = [c for a in row["areas"].values() for c in a["components"]
-                         if c["key"] == "impact.citation"][0]
-            citation[row["docNumber"]] = component["detail"]["peerN"]
-        # 비교집단 표본 수 = 대표문헌 수(6) 여야 한다. 11 이면 패밀리 중복이 섞인 것.
-        for doc, peer_n in citation.items():
-            self.assertEqual(peer_n, 6, "%s 의 비교집단 표본이 채점 단위와 다릅니다: %d" % (doc, peer_n))
+            components = {c["key"]: c for a in row["areas"].values() for c in a["components"]}
+            # 백분위 비교집단 표본 수 = 대표문헌 수(6). 11 이면 패밀리 중복이 섞인 것.
+            peer_n = components["impact.leadership"]["detail"]["peerN"]
+            self.assertEqual(peer_n, 6,
+                             "%s 의 비교집단 표본이 채점 단위와 다릅니다: %d" % (row["docNumber"], peer_n))
+            # 외부TR/TR 최대값을 구하는 모집단도 같은 단위여야 한다.
+            for key in ("impact.competitorCoverage", "impact.citation"):
+                population_n = components[key]["detail"]["populationN"]
+                self.assertEqual(population_n, 6,
+                                 "%s 의 %s 모집단이 채점 단위와 다릅니다: %d"
+                                 % (row["docNumber"], key, population_n))
 
 
 class RemainingTermTest(unittest.TestCase):

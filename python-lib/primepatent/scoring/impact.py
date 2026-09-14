@@ -1,17 +1,15 @@
 # -*- coding: utf-8 -*-
 """영향력·경쟁성.
 
-경쟁사 커버리지 + 연령보정 피인용 영향력 + 기술 선도성
+경쟁사 커버리지(외부TR) + 연령보정 피인용 영향력(TR) + 기술 선도성
 배점은 config.COMPONENT_MAX 가 단일 기준이다.
 """
 
 from __future__ import annotations
 
-import math
 from typing import Any, Dict, List
 
 from ..config import COMPONENT_MAX
-from ..parsing import safe_log1p
 from .common import AreaResult, Component, make_component
 from .context import AnalysisContext
 
@@ -27,73 +25,54 @@ def score(record: Dict[str, Any], analysis: Dict[str, Any], ctx: AnalysisContext
     return AreaResult(key="impact", label=LABEL, components=components)
 
 
-def _competitor_coverage(record: Dict[str, Any], ctx: AnalysisContext) -> Component:
-    """고유 비자기 피인용 출원인 수 백분위 × 5.
+def _fmt_max(value: float) -> str:
+    """배점을 사람이 읽는 형태로(7.0 -> '7')."""
+    return str(int(value)) if float(value) == int(value) else str(value)
 
-    '타인 피인용 문헌번호(F1)' 를 근거로 하되, 업로드 모집단 안에서 각 인용문헌의
-    출원인을 해석해 **고유 출원인 수**를 센다(같은 회사가 여러 건 인용해도 1로 셈).
-    해석률이 낮으면 문헌 수를 대용지표로 쓰고 그 사실을 method 로 표기한다.
+
+def _max_ratio_component(record: Dict[str, Any], ctx: AnalysisContext,
+                         key: str, label: str, metric: str,
+                         metric_label: str) -> Component:
+    """(대상 건의 값 / 모집단 최대값) x 배점.
+
+    백분위가 아니라 **모집단 최대값 대비 비율**을 그대로 쓴다.
+    모집단은 백분위 비교집단과 같은 단위(채점 대상 문헌)로 잡는다.
     """
-    maximum = COMPONENT_MAX["impact.competitorCoverage"]
-    value_raw = ctx.unique_citing_applicants(record)
-    rank, group, size = ctx.rank("uniqueCitingApplicants", record, value_raw)
-    method = record.get("_uniqueCitingApplicantsMethod")
-    citing_docs = len(record.get("otherForwardCitations") or [])
-    notes = []
-    if method == "proxy":
-        notes.append("피인용 문헌의 출원인을 모집단에서 확인할 수 없어 "
-                     "'타인 피인용 문헌 수'를 대용지표로 사용했습니다.")
+    maximum = COMPONENT_MAX[key]
+    ratio, value, population_max = ctx.max_ratio(metric, record)
+    notes: List[str] = []
+    if ratio is None:
+        if value is None:
+            notes.append("'%s' 값이 없어 0점 처리했습니다. 컬럼 매핑에서 '%s' 를 확인하세요."
+                         % (metric_label, metric_label))
+        else:
+            notes.append("모집단의 '%s' 최대값이 0이라 비율을 계산할 수 없어 0점 처리했습니다."
+                         % metric_label)
     return make_component(
-        "impact.competitorCoverage", "경쟁사 커버리지", rank * maximum,
-        detail={"uniqueCitingApplicants": value_raw,
-                "otherForwardCitationDocs": citing_docs,
-                "method": method,
-                "unresolvedCitations": record.get("_citingUnresolved"),
-                "rank": round(rank, 3), "peerGroup": group, "peerN": size,
-                "peerStats": ctx.peer_stats("uniqueCitingApplicants", record)},
+        key, label, (ratio or 0.0) * maximum,
+        detail={"metric": metric_label,
+                "value": value,
+                "populationMax": population_max,
+                "ratio": None if ratio is None else round(ratio, 4),
+                "populationN": len(ctx.peer_records),
+                "formula": "(%s / 모집단 %s 최대값) x %s"
+                           % (metric_label, metric_label, _fmt_max(maximum))},
         notes=notes)
 
 
-def _raw_citation_stats(record: Dict[str, Any], ctx: AnalysisContext):
-    """피인용 비교집단 분포를 원값(건수) 기준으로 환산해 돌려준다."""
-    stats = ctx.peer_stats("logForward", record)
-    if not stats:
-        return None
-    converted = dict(stats)
-    for key in ("min", "p25", "median", "p75", "max", "mean"):
-        if converted.get(key) is not None:
-            raw = math.expm1(float(converted[key]))
-            converted[key] = int(round(raw)) if abs(raw - round(raw)) < 0.01 else round(raw, 1)
-    converted["unit"] = "피인용 건수(로그 역변환)"
-    return converted
+def _competitor_coverage(record: Dict[str, Any], ctx: AnalysisContext) -> Component:
+    """경쟁사 커버리지 = (대상 건의 외부TR / 모집단 중 외부TR 최대값) x 7."""
+    return _max_ratio_component(record, ctx, "impact.competitorCoverage",
+                                "경쟁사 커버리지", "externalTr", "외부TR")
 
 
 def _citation(record: Dict[str, Any], ctx: AnalysisContext) -> Component:
-    """LN(1+피인용) 의 동일주제·동일우선연도 백분위 × 15.
+    """연령보정 피인용 영향력 = (대상 건의 TR / 모집단 중 TR 최대값) x 13.
 
-    비교집단 표본이 부족하면 연간 피인용 속도 백분위로 대체한다.
+    연령보정은 TR 지표 자체에 이미 반영된 것으로 본다.
     """
-    maximum = COMPONENT_MAX["impact.citation"]
-    forward = record.get("forwardCitationCountResolved") or 0
-    log_value = safe_log1p(forward)
-    rank, group, size = ctx.rank("logForward", record, log_value)
-    method = "logForward"
-    notes: List[str] = []
-    if group in ("insufficient", "none"):
-        speed = ctx.citation_speed(record)
-        speed_rank, speed_group, speed_size = ctx.rank("citationSpeed", record, speed)
-        if speed_group not in ("insufficient", "none"):
-            rank, group, size, method = speed_rank, speed_group, speed_size, "citationSpeed"
-            notes.append("비교집단 표본 부족으로 연간 피인용 속도 백분위를 사용했습니다.")
-    speed = ctx.citation_speed(record)
-    return make_component(
-        "impact.citation", "연령보정 피인용 영향력", rank * maximum,
-        detail={"forwardCitations": forward, "logForward": round(log_value, 4),
-                "citationSpeed": None if speed is None else round(speed, 3),
-                "method": method, "rank": round(rank, 3),
-                "peerGroup": group, "peerN": size,
-                "peerStats": _raw_citation_stats(record, ctx)},
-        notes=notes)
+    return _max_ratio_component(record, ctx, "impact.citation",
+                                "연령보정 피인용 영향력", "totalTr", "TR")
 
 
 def _leadership(record: Dict[str, Any], ctx: AnalysisContext) -> Component:

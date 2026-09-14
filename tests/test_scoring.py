@@ -40,6 +40,7 @@ def make_record(**overrides):
         "인용 문헌 수(B1)": 8, "Current CPC All": "H01L23/00; H01L24/05; H01L25/065",
         "분할출원 여부": "Y", "심판 전체 횟수": 1, "실시권 설정 유무": "유",
         "IPURE AI Score": 85,
+        "TR": 40, "외부TR": 12,
         "WIPS패밀리 개별국 문헌 수(출원기준)": "KR:2|US:2|JP:1|EP:1|CN:1|TW:1",
         "WIPS패밀리 문헌 수(출원기준)": 8,
     }
@@ -66,6 +67,7 @@ def make_record(**overrides):
         "divisionalFlag": {"column": "분할출원 여부"}, "trialCount": {"column": "심판 전체 횟수"},
         "licenseFlag": {"column": "실시권 설정 유무"},
         "ipureAiScore": {"column": "IPURE AI Score"},
+        "totalTr": {"column": "TR"}, "externalTr": {"column": "외부TR"},
         "familyCountryDocCounts": {"column": "WIPS패밀리 개별국 문헌 수(출원기준)"},
         "familyDocCount": {"column": "WIPS패밀리 문헌 수(출원기준)"},
     }
@@ -242,19 +244,66 @@ class SurvivalTest(unittest.TestCase):
             component = component_of(score_one(record, None, ctx), "market.familySize")
             self.assertEqual(component["score"], expected, count)
 
-    def test_citation_percentile_orders_records(self):
-        low = make_record(**{"출원번호": "KR1", "WIPS패밀리 ID": "FA", "피인용 문헌 수(F1)": 0,
-                             "피인용 문헌번호(F1)": "", "타인 피인용 문헌번호(F1)": ""})
-        mid = make_record(**{"출원번호": "KR2", "WIPS패밀리 ID": "FB", "피인용 문헌 수(F1)": 5})
-        high = make_record(**{"출원번호": "KR3", "WIPS패밀리 ID": "FC", "피인용 문헌 수(F1)": 90})
-        records = [low, mid, high]
+    def test_citation_uses_tr_max_ratio(self):
+        """연령보정 피인용 영향력 = (TR / 모집단 TR 최대값) x 13."""
+        records = [make_record(**{"출원번호": "KR%d" % i, "WIPS패밀리 ID": "F%d" % i, "TR": tr})
+                   for i, tr in enumerate([0, 25, 100])]
         ctx, _config = prepare(records)
         scores = [component_of(score_one(r, None, ctx), "impact.citation")["score"]
                   for r in records]
-        self.assertLess(scores[0], scores[1])
-        self.assertLess(scores[1], scores[2])
-        self.assertEqual(scores[0], 0.0)          # 피인용 0건은 백분위 0
-        self.assertEqual(scores[2], 15.0)         # 최상위는 만점
+        self.assertEqual(scores[0], 0.0)                     # TR 0 -> 0점
+        self.assertAlmostEqual(scores[1], 25.0 / 100.0 * 13.0, places=6)
+        self.assertEqual(scores[2], 13.0)                    # 최대값 보유 건은 만점
+
+    def test_competitor_coverage_uses_external_tr_max_ratio(self):
+        """경쟁사 커버리지 = (외부TR / 모집단 외부TR 최대값) x 7."""
+        records = [make_record(**{"출원번호": "KR%d" % i, "WIPS패밀리 ID": "F%d" % i, "외부TR": value})
+                   for i, value in enumerate([2, 8, 40])]
+        ctx, _config = prepare(records)
+        scores = [component_of(score_one(r, None, ctx), "impact.competitorCoverage")["score"]
+                  for r in records]
+        self.assertAlmostEqual(scores[0], 2.0 / 40.0 * 7.0, places=6)
+        self.assertAlmostEqual(scores[1], 8.0 / 40.0 * 7.0, places=6)
+        self.assertEqual(scores[2], 7.0)
+
+    def test_max_ratio_detail_is_auditable(self):
+        records = [make_record(**{"출원번호": "KR%d" % i, "WIPS패밀리 ID": "F%d" % i, "TR": tr})
+                   for i, tr in enumerate([10, 50])]
+        ctx, _ = prepare(records)
+        detail = component_of(score_one(records[0], None, ctx), "impact.citation")["detail"]
+        self.assertEqual(detail["value"], 10.0)
+        self.assertEqual(detail["populationMax"], 50.0)
+        self.assertAlmostEqual(detail["ratio"], 0.2, places=6)
+        self.assertEqual(detail["populationN"], 2)
+        self.assertIn("13", detail["formula"])
+
+    def test_missing_tr_scores_zero_with_reason(self):
+        """값이 없으면 숨기지 말고 0점 + 사유를 남긴다."""
+        blank = make_record(**{"출원번호": "KR1", "WIPS패밀리 ID": "FA", "TR": "", "외부TR": ""})
+        other = make_record(**{"출원번호": "KR2", "WIPS패밀리 ID": "FB", "TR": 30, "외부TR": 9})
+        ctx, _ = prepare([blank, other])
+        result = score_one(blank, None, ctx)
+        for key, label in [("impact.citation", "TR"), ("impact.competitorCoverage", "외부TR")]:
+            component = component_of(result, key)
+            self.assertEqual(component["score"], 0.0, key)
+            self.assertIsNone(component["detail"]["value"], key)
+            self.assertTrue(component["notes"], key)
+            self.assertIn(label, component["notes"][0])
+
+    def test_zero_population_max_scores_zero_without_crash(self):
+        """모집단 전체가 0/결측이어도 0 나눗셈 없이 0점으로 처리한다."""
+        records = [make_record(**{"출원번호": "KR%d" % i, "WIPS패밀리 ID": "F%d" % i,
+                                  "TR": 0, "외부TR": 0})
+                   for i in range(2)]
+        ctx, _ = prepare(records)
+        for record in records:
+            result = score_one(record, None, ctx)
+            for key in ("impact.citation", "impact.competitorCoverage"):
+                component = component_of(result, key)
+                self.assertEqual(component["score"], 0.0)
+                self.assertEqual(component["detail"]["populationMax"], 0.0)
+                self.assertIsNone(component["detail"]["ratio"])
+                self.assertTrue(component["notes"])
 
     def test_leadership_favors_earlier_priority(self):
         early = make_record(**{"출원번호": "KR-E", "WIPS패밀리 ID": "FE", "최우선출원일": "2012-01-01"})
@@ -436,17 +485,19 @@ class PeerStatsTest(unittest.TestCase):
         self.assertEqual(detail["claimPeerN"], stats["n"])
         self.assertIn("independentPeerStats", detail)
 
-    def test_citation_distribution_is_reported_in_raw_counts(self):
-        """내부 계산은 LN(1+x) 이지만 화면 표시는 건수여야 한다."""
+    def test_leadership_distribution_is_reported_in_years(self):
+        """우선일 분포는 ordinal 이 아니라 연도로 보여야 한다."""
+        # 최초우선일은 출원일보다 늦을 수 없으므로 출원일도 함께 맞춘다.
         records = [make_record(**{"출원번호": "KR%02d" % i, "WIPS패밀리 ID": "F%02d" % i,
-                                  "피인용 문헌 수(F1)": count})
-                   for i, count in enumerate([0, 2, 10, 50, 100])]
+                                  "출원일": "%d-03-01" % year,
+                                  "최우선출원일": "%d-03-01" % year})
+                   for i, year in enumerate([2010, 2013, 2015, 2017, 2019])]
         ctx, _ = prepare(records, ScoringConfig(peer_min_size=3))
-        detail = component_of(score_one(records[2], None, ctx), "impact.citation")["detail"]
+        detail = component_of(score_one(records[2], None, ctx), "impact.leadership")["detail"]
         stats = detail["peerStats"]
-        self.assertEqual(stats["min"], 0)
-        self.assertEqual(stats["max"], 100)      # 로그값(4.6)이 아니라 건수
-        self.assertIn("건수", stats["unit"])
+        self.assertEqual(stats["min"], 2010)
+        self.assertEqual(stats["max"], 2019)
+        self.assertIn("우선연도", stats["unit"])
 
 
 class OutputIdentityTest(unittest.TestCase):

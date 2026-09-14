@@ -18,6 +18,7 @@ HEADERS = [
     "우선권 번호", "우선권 국가", "우선권 주장일", "최우선출원일",
     "인용 문헌 수(B1)", "인용 문헌번호(B1)", "피인용 문헌 수(F1)", "피인용 문헌번호(F1)",
     "자기 피인용 문헌번호(F1)", "타인 피인용 문헌번호(F1)",
+    "TR", "외부TR",
     "WIPS패밀리 ID", "WIPS패밀리 문헌번호(출원기준)", "WIPS패밀리 문헌 수(출원기준)",
     "WIPS패밀리 국가 수(출원기준)", "WIPS패밀리 개별국 문헌 수(출원기준)",
     "상태정보[KR,JP,US,EP,CN,CA,AU]", "현재권리자[KR,JP,US,CN,CA,AU]",
@@ -96,6 +97,8 @@ def build_rows(count: int = 90, seed: int = 20260825):
             granted = status.startswith("등록") or status == "소멸"
             forward = max(0, base_citations + random.randint(-2, 3))
             citing = random.sample(doc_numbers, min(len(doc_numbers), forward)) if forward else []
+            total_tr = round(forward * random.uniform(0.6, 1.8), 2)
+            external_tr = round(total_tr * random.uniform(0.2, 0.9), 2)
             self_citing = [c for c in citing if c[2:] .startswith("10%d" % year)][:1]
             other_citing = [c for c in citing if c not in self_citing]
             breadth = random.randint(0, 2)
@@ -130,6 +133,9 @@ def build_rows(count: int = 90, seed: int = 20260825):
                 "피인용 문헌번호(F1)": ";".join(citing),
                 "자기 피인용 문헌번호(F1)": ";".join(self_citing),
                 "타인 피인용 문헌번호(F1)": ";".join(other_citing),
+                # TR = WIPS 가 제공하는 연령보정 피인용 지표, 외부TR = 그중 타사 인용분
+                "TR": total_tr,
+                "외부TR": external_tr,
                 "WIPS패밀리 ID": family_id,
                 "WIPS패밀리 문헌번호(출원기준)": ";".join(members),
                 "WIPS패밀리 문헌 수(출원기준)": len(members),

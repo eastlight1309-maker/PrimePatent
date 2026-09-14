@@ -45,8 +45,8 @@ COMPONENT_MAX = {
     "market.commercial": 6.0,          # 상업화·거래 신호
     "market.familySize": 2.0,          # 패밀리 건수
     # 영향력·경쟁성 25
-    "impact.competitorCoverage": 5.0,  # 경쟁사 커버리지
-    "impact.citation": 15.0,           # 연령보정 피인용 영향력
+    "impact.competitorCoverage": 7.0,  # 경쟁사 커버리지 (외부TR 최대값 대비 비율)
+    "impact.citation": 13.0,           # 연령보정 피인용 영향력 (TR 최대값 대비 비율)
     "impact.leadership": 5.0,          # 기술 선도성
 }
 

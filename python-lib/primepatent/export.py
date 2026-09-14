@@ -171,7 +171,7 @@ def to_excel_bytes(payload: Dict[str, Any]) -> bytes:
     summary_frame = pd.DataFrame(_summary_rows(payload), columns=["항목", "값"])
     mapping_frame = pd.DataFrame(_mapping_rows(payload), columns=["표준 필드", "엑셀 컬럼", "매핑 방식", "신뢰도"])
     detail_frame = pd.DataFrame(_detail_rows(payload),
-                                columns=["문헌번호", "세부지표", "점수", "배점", "산출근거", "주의"])
+                                columns=["출원번호", "세부지표", "점수", "배점", "산출근거", "주의"])
 
     llm_frame = pd.DataFrame(_llm_rows(payload), columns=LLM_SHEET_COLUMNS)
 
@@ -299,7 +299,9 @@ def _detail_rows(payload: Dict[str, Any], limit: int = 300) -> List[List[Any]]:
             for component in area.get("components", []):
                 detail = component.get("detail") or {}
                 brief = ", ".join("%s=%s" % (k, _brief(v)) for k, v in list(detail.items())[:6])
-                rows.append([safe_cell(row.get("docNumber")), component.get("label"),
+                # 식별자는 LLM판단근거 시트와 동일하게 출원번호로 맞춘다.
+                rows.append([safe_cell(row.get("applicationNumber") or row.get("docNumber")),
+                             component.get("label"),
                              component.get("score"), COMPONENT_MAX.get(component.get("key")),
                              safe_cell(brief[:500]),
                              safe_cell(" / ".join(component.get("notes") or [])[:300])])

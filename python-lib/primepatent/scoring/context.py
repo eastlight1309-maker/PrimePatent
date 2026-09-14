@@ -8,7 +8,7 @@ from datetime import date
 from typing import Any, Dict, List, Optional, Sequence
 
 from ..config import ScoringConfig
-from ..parsing import safe_log1p, to_text, years_between
+from ..parsing import to_float, to_text, years_between
 from ..peers import GlobalIndex, PeerSet
 
 _DOC_KEY_RE = re.compile(r"[^0-9A-Z]")
@@ -53,6 +53,8 @@ class AnalysisContext:
         self.doc_index: Dict[str, Dict[str, Any]] = {}
         self.digit_index: Dict[str, Dict[str, Any]] = {}
         self.topic_family_total = 0
+        # 모집단 최대값(외부TR / TR). 최대값 대비 비율로 점수를 매기는 지표에 사용한다.
+        self.metric_max: Dict[str, float] = {}
         self._build()
 
     # ------------------------------------------------------------------ topic
@@ -68,7 +70,33 @@ class AnalysisContext:
     def _build(self) -> None:
         self._build_doc_index()
         self._build_applicant_stats()
+        self._build_metric_max()
         self._build_peers()
+
+    def _build_metric_max(self) -> None:
+        """모집단 최대값을 구한다.
+
+        비교 단위를 백분위와 맞추기 위해 **채점 대상(peer_records)** 기준으로 계산한다.
+        값이 없거나 모두 0 이면 max 를 0 으로 두고, 점수 계산에서 0점 처리한다.
+        """
+        for metric in ("externalTr", "totalTr"):
+            values = []
+            for record in self.peer_records:
+                value = to_float(record.get(metric), None)
+                if value is not None and value == value and value > 0:
+                    values.append(float(value))
+            self.metric_max[metric] = max(values) if values else 0.0
+
+    def max_ratio(self, metric: str, record: Dict[str, Any]):
+        """(비율, 값, 최대값). 값이 없으면 비율 None 으로 돌려준다."""
+        maximum = self.metric_max.get(metric, 0.0)
+        value = to_float(record.get(metric), None)
+        if value is None or value != value:
+            return None, None, maximum
+        value = max(0.0, float(value))
+        if maximum <= 0:
+            return None, value, maximum
+        return min(1.0, value / maximum), value, maximum
 
     def _build_doc_index(self) -> None:
         for record in self.records:
@@ -108,12 +136,13 @@ class AnalysisContext:
             self.applicant_recent_index.add(self.applicant_recent_count.get(key, 0))
 
     def _build_peers(self) -> None:
+        # logForward / uniqueCitingApplicants 백분위는 더 이상 채점에 쓰지 않는다.
+        # (경쟁사 커버리지·피인용 영향력이 외부TR / TR 최대값 비율로 바뀜)
+        # citationSpeed 는 engine 의 '신흥 원천기술' 플래그가 계속 사용한다.
         metrics = {
-            "logForward": lambda r: safe_log1p(r.get("forwardCitationCountResolved")),
             "claimCount": lambda r: r.get("claimCount"),
             "independentClaimCount": lambda r: r.get("independentClaimCount"),
             "citationSpeed": self.citation_speed,
-            "uniqueCitingApplicants": self.unique_citing_applicants,
             "priorityOrdinal": self.priority_ordinal,
             "familyCountryCount": lambda r: (r.get("_family") or {}).get("countryCount"),
         }
