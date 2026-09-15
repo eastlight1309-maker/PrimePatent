@@ -87,7 +87,8 @@
     node.textContent = message;
     node.hidden = false;
     if (toastTimer) clearTimeout(toastTimer);
-    toastTimer = setTimeout(function () { node.hidden = true; }, kind === "err" ? 8000 : 4000);
+    toastTimer = setTimeout(function () { node.hidden = true; },
+                            (kind === "err" || kind === "warn") ? 8000 : 4000);
   }
 
   // ------------------------------------------------------------ 상태
@@ -546,6 +547,7 @@
     $("pp-app-approve").addEventListener("click", approveApplicants);
     $("pp-app-search").addEventListener("input", debounce(renderApplicantTable, 250));
     $("pp-app-only-merged").addEventListener("change", renderApplicantTable);
+    $("pp-app-only-pending").addEventListener("change", renderApplicantTable);
     document.querySelector('.pp-tab[data-tab="applicant"]').addEventListener("click", function () {
       if (state.upload && !state.applicantGroups.length) loadApplicants();
     });
@@ -586,11 +588,20 @@
         "개가 표준명으로 통일되어 분석에 반영됩니다."
       : "아직 승인하지 않았습니다. 승인 전에는 원본 표기 그대로 분석되며 출원인 기준 점수가 낮게 나올 수 있습니다.";
 
+    // 그룹별 승인/분리는 화면에서 즉시 바뀌므로, 요약 숫자도 현재 화면 상태에서 다시 센다.
+    var live = state.applicantGroups || [];
+    var mergedGroups = live.filter(function (g) { return (g.variants || []).length > 1; });
+    var pendingGroups = mergedGroups.filter(function (g) { return g.approved === false; });
+
     var grid = $("pp-app-summary");
     grid.innerHTML = "";
-    [["표준 출원인", info.groupCount], ["원본 표기", info.variantCount],
-     ["병합된 그룹", info.mergedGroupCount], ["병합 대상 표기", info.mergedVariantCount],
-     ["대상 문헌", info.documentCount]].forEach(function (pair) {
+    [["표준 출원인", live.length || info.groupCount],
+     ["원본 표기", live.length ? live.reduce(function (sum, g) {
+       return sum + ((g.variants || []).length || 1); }, 0) : info.variantCount],
+     ["병합된 그룹", live.length ? mergedGroups.length : info.mergedGroupCount],
+     ["승인 대기", live.length ? pendingGroups.length : info.pendingGroupCount],
+     ["공동출원 건", info.jointDocumentCount], ["대상 문헌", info.documentCount]]
+      .forEach(function (pair) {
       var box = el("div", "pp-metric");
       box.appendChild(el("div", "pp-metric-label", pair[0]));
       box.appendChild(el("div", "pp-metric-value", esc(pair[1])));
@@ -604,59 +615,103 @@
     tbody.innerHTML = "";
     var keyword = ($("pp-app-search").value || "").trim().toLowerCase();
     var onlyMerged = $("pp-app-only-merged").checked;
+    var onlyPending = $("pp-app-only-pending").checked;
     var shown = 0;
 
     state.applicantGroups.forEach(function (group, index) {
-      if (onlyMerged && (group.variants || []).length < 2) return;
+      var variants = group.variants || [];
+      var merged = variants.length > 1;
+      var approved = group.approved !== false;
+      if (onlyMerged && !merged) return;
+      if (onlyPending && approved) return;
       if (keyword) {
         var blob = (group.standardName + " " +
-          (group.variants || []).map(function (v) { return v.raw; }).join(" ")).toLowerCase();
+          variants.map(function (v) { return v.raw; }).join(" ")).toLowerCase();
         if (blob.indexOf(keyword) < 0) return;
       }
       shown += 1;
       var tr = el("tr");
-      if ((group.variants || []).length > 1) tr.className = "pp-app-approved";
+      if (merged && approved) tr.className = "pp-app-approved";
 
+      /* --- 표준명 --- */
       var nameCell = el("td");
       var input = el("input", "pp-input");
       input.type = "text";
       input.value = group.standardName;
       input.style.width = "100%";
-      input.addEventListener("change", function () {
-        state.applicantGroups[index].standardName = input.value.trim();
-        markApplicantDirty();
-      });
+      input.addEventListener("change", function () { applyStandardName(index, input.value); });
       nameCell.appendChild(input);
+      if (group.suggestedSource) {
+        nameCell.appendChild(el("div", "pp-hint", "추천 근거: " + group.suggestedSource +
+          " · 법인격 표기 제외"));
+      }
       tr.appendChild(nameCell);
 
+      /* --- 원본 표기 --- */
       var variantCell = el("td");
       var list = el("div", "pp-variant-list");
-      (group.variants || []).forEach(function (variant, variantIndex) {
+      variants.forEach(function (variant, variantIndex) {
         var chip = el("span", "pp-variant");
         chip.appendChild(document.createTextNode(variant.raw));
-        chip.appendChild(el("span", "pp-variant-count", variant.count + "건"));
-        if ((group.variants || []).length > 1) {
+        var detail = variant.count + "건";
+        if (variant.joint) detail += " (단독 " + (variant.solo || 0) + "·공동 " + variant.joint + ")";
+        chip.appendChild(el("span", "pp-variant-count", detail));
+        if (merged) {
           var split = el("button", "pp-variant-split", "×");
-          split.title = "이 표기를 별도 출원인으로 분리";
-          split.addEventListener("click", function () {
-            splitVariant(index, variantIndex);
-          });
+          split.title = "이 표기는 다른 회사입니다 - 별도 출원인으로 분리";
+          split.addEventListener("click", function () { splitVariant(index, variantIndex); });
           chip.appendChild(split);
         }
         list.appendChild(chip);
       });
       variantCell.appendChild(list);
       tr.appendChild(variantCell);
+
       tr.appendChild(el("td", "pp-num", group.count));
 
+      /* --- 상태 --- */
+      var stateCell = el("td");
+      if (!merged) {
+        stateCell.appendChild(el("span", "pp-badge pp-badge-muted", "단일 표기"));
+      } else if (approved) {
+        stateCell.appendChild(el("span", "pp-badge pp-badge-ok", "승인됨"));
+      } else {
+        stateCell.appendChild(el("span", "pp-badge pp-badge-warn", "검토 필요"));
+      }
+      tr.appendChild(stateCell);
+
+      /* --- 작업 --- */
       var actionCell = el("td");
-      var reset = el("button", "pp-btn pp-btn-mini", "표준명 복원");
+      var actions = el("div", "pp-variant-list");
+
+      var change = el("button", "pp-btn pp-btn-mini", "변경");
+      change.title = "입력한 표준명으로 변경합니다(변경하면 다시 승인해야 합니다)";
+      change.addEventListener("click", function () { applyStandardName(index, input.value); });
+      actions.appendChild(change);
+
+      if (merged) {
+        var approve = el("button", "pp-btn pp-btn-mini" + (approved ? "" : " pp-btn-primary"),
+                         approved ? "승인 취소" : "승인");
+        approve.setAttribute("data-role", approved ? "unapprove" : "approve");
+        approve.title = approved
+          ? "승인을 취소하면 이 그룹은 병합하지 않고 원본 표기를 그대로 사용합니다"
+          : "이 그룹의 표기들을 표준명으로 병합합니다";
+        approve.addEventListener("click", function () {
+          state.applicantGroups[index].approved = !approved;
+          renderApplicantTable();
+          renderApplicantStatus();
+          markApplicantDirty();
+        });
+        actions.appendChild(approve);
+      }
+
+      var reset = el("button", "pp-btn pp-btn-mini", "추천값 복원");
       reset.addEventListener("click", function () {
-        state.applicantGroups[index].standardName = group.suggestedName;
-        renderApplicantTable();
-        markApplicantDirty();
+        applyStandardName(index, group.suggestedName);
       });
-      actionCell.appendChild(reset);
+      actions.appendChild(reset);
+
+      actionCell.appendChild(actions);
       tr.appendChild(actionCell);
       tbody.appendChild(tr);
     });
@@ -664,11 +719,26 @@
     if (!shown) {
       var tr = el("tr");
       var td = el("td", "pp-empty",
-        onlyMerged ? "병합된 그룹이 없습니다. 체크를 해제하면 전체 출원인을 볼 수 있습니다."
-                   : "표시할 출원인이 없습니다.");
-      td.colSpan = 4;
+        onlyPending ? "승인 대기 중인 그룹이 없습니다."
+          : (onlyMerged ? "병합된 그룹이 없습니다. 체크를 해제하면 전체 출원인을 볼 수 있습니다."
+                        : "표시할 출원인이 없습니다."));
+      td.colSpan = 5;
       tr.appendChild(td); tbody.appendChild(tr);
     }
+  }
+
+  /* 표준명 변경. 내용이 바뀌면 그 그룹의 승인은 다시 받아야 한다. */
+  function applyStandardName(index, value) {
+    var group = state.applicantGroups[index];
+    var next = String(value || "").trim();
+    if (!next) { toast("표준명을 입력하십시오.", "err"); return; }
+    var changed = next !== group.standardName;
+    group.standardName = next;
+    if (changed && (group.variants || []).length > 1) group.approved = false;
+    renderApplicantTable();
+    renderApplicantStatus();
+    markApplicantDirty();
+    if (changed) toast("표준명을 '" + next + "' 로 변경했습니다.", "ok");
   }
 
   /* 잘못 묶인 표기를 별도 출원인으로 분리한다. */
@@ -681,13 +751,19 @@
       groupId: group.groupId + "-s" + variantIndex,
       standardName: variant.raw,
       suggestedName: variant.raw,
+      suggestedSource: "분리한 원본 표기",
       count: variant.count,
+      soloCount: variant.solo || 0,
+      jointCount: variant.joint || 0,
       variantCount: 1,
       variants: [variant],
       aliases: [],
-      needsReview: false
+      needsReview: false,
+      approved: true
     });
+    group.approved = (group.variants.length <= 1) ? true : group.approved;
     renderApplicantTable();
+    renderApplicantStatus();
     markApplicantDirty();
   }
 
@@ -706,6 +782,17 @@
     });
     if (blank.length) { toast("표준명이 비어 있는 그룹이 있습니다.", "err"); return; }
 
+    var pending = state.applicantGroups.filter(function (g) {
+      return (g.variants || []).length > 1 && g.approved === false;
+    });
+    if (pending.length && !window.confirm(
+        "승인하지 않은 그룹이 " + pending.length + "개 있습니다.\n" +
+        "이 그룹들은 병합하지 않고 원본 표기 그대로 분석됩니다.\n\n그대로 진행할까요?")) {
+      $("pp-app-only-pending").checked = true;
+      renderApplicantTable();
+      return;
+    }
+
     $("pp-app-approve").disabled = true;
     request("/api/upload/" + state.upload.uploadId + "/applicants/approve",
             { method: "POST", body: { groups: state.applicantGroups } })
@@ -713,7 +800,9 @@
         $("pp-app-approve").disabled = false;
         state.applicantState = data.state;
         renderApplicantStatus();
-        toast("출원인 표준화를 승인했습니다. 이후 분석에 반영됩니다.", "ok");
+        renderApplicantTable();
+        toast(data.warning || "출원인 표준화를 승인했습니다. 이후 분석에 반영됩니다.",
+              data.warning ? "warn" : "ok");
         setTab("mapping");
       })
       .catch(function (error) {

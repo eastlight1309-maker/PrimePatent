@@ -9,7 +9,7 @@ BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(BASE, "python-lib"))
 
 from primepatent.applicants import (build_name_map, cluster_applicants,  # noqa: E402
-                                    collect_applicants, summarize)
+                                    collect_applicants, core_name, summarize)
 from primepatent.parsing import to_entity_list  # noqa: E402
 from primepatent.records import build_records  # noqa: E402
 
@@ -49,7 +49,11 @@ class ClusterTest(unittest.TestCase):
             ("SAMSUNG ELECTRONICS CO., LTD.", "SAMSUNG ELECTRONICS", "C1")), MAPPING))
         self.assertEqual(len(groups), 1)
         self.assertEqual(groups[0]["variantCount"], 3)
-        self.assertEqual(groups[0]["standardName"], "SAMSUNG ELECTRONICS")
+        # 표준명은 한글 표기를 먼저 고르고 법인격 표기를 뗀다
+        self.assertEqual(groups[0]["standardName"], "삼성전자")
+        self.assertEqual(groups[0]["suggestedSource"], "한글 표기")
+        # 표기가 2개 이상 묶인 그룹은 승인 전에는 병합하지 않는다
+        self.assertFalse(groups[0]["approved"])
 
     def test_groups_by_normalized_name_across_languages(self):
         """코드가 없어도 대표명화 값이 같으면 한글·영문 표기를 묶어야 한다."""
@@ -93,7 +97,9 @@ class NameMapTest(unittest.TestCase):
         groups = cluster_applicants(collect_applicants(rows(
             ("삼성전자(주)", "SAMSUNG ELECTRONICS", "C1"),
             ("삼성전자 주식회사", "SAMSUNG ELECTRONICS", "C1")), MAPPING))
-        groups[0]["standardName"] = "삼성전자"
+        self.assertEqual(groups[0]["standardName"], "삼성전자")
+        self.assertEqual(build_name_map(groups), {}, "승인 전에는 병합하지 않아야 한다")
+        groups[0]["approved"] = True
         mapping = build_name_map(groups)
         self.assertEqual(mapping["삼성전자(주)"], "삼성전자")
         self.assertEqual(mapping["삼성전자 주식회사"], "삼성전자")
@@ -102,6 +108,83 @@ class NameMapTest(unittest.TestCase):
 
     def test_blank_standard_name_is_ignored(self):
         self.assertEqual(build_name_map([{"standardName": "", "variants": [{"raw": "A"}]}]), {})
+
+
+class CoreNameTest(unittest.TestCase):
+    """표준명에서 법인격 표기를 떼고 핵심 명칭만 남긴다."""
+
+    CASES = [
+        ("주식회사 이엔에프테크놀로지", "이엔에프테크놀로지"),
+        ("(주)엘지화학", "엘지화학"),
+        ("엘지화학 주식회사", "엘지화학"),
+        ("도레이첨단소재 주식회사", "도레이첨단소재"),
+        ("SAMSUNG ELECTRONICS CO., LTD.", "SAMSUNG ELECTRONICS"),
+        ("MICRON TECHNOLOGY, INC.", "MICRON TECHNOLOGY"),
+        ("Siemens AG", "Siemens"),
+        ("ASML Holding N.V.", "ASML Holding"),
+        ("The Boeing Company", "Boeing"),
+        ("株式会社 東芝", "東芝"),
+    ]
+
+    def test_core_names(self):
+        for raw, expected in self.CASES:
+            self.assertEqual(core_name(raw), expected, raw)
+
+    def test_name_made_only_of_legal_form_is_kept(self):
+        self.assertEqual(core_name("주식회사"), "주식회사")
+        self.assertEqual(core_name(""), "")
+
+
+class JointApplicationTest(unittest.TestCase):
+    """공동출원 행의 대표명화 값이 파트너에게 옮겨 붙으면 안 된다.
+
+    실제 증상: '주식회사 이엔에프테크놀로지 68건' 과 '주식회사 제이케이머티리얼즈 5건' 이
+    한 그룹으로 묶임(공동출원 5건의 대표명화 컬럼에 대표 출원인 1곳만 적혀 있었음).
+    """
+
+    MAPPING = {"applicant": {"column": "출원인"},
+               "applicantNormalized": {"column": "대표명"}}
+
+    def _rows(self, solo, joint):
+        data = [{"출원인": "주식회사 이엔에프테크놀로지", "대표명": "ENF TECHNOLOGY"}] * solo
+        data += [{"출원인": "주식회사 이엔에프테크놀로지;주식회사 제이케이머티리얼즈",
+                  "대표명": "ENF TECHNOLOGY"}] * joint
+        return data
+
+    def test_partner_is_not_merged_into_lead_applicant(self):
+        groups = cluster_applicants(collect_applicants(self._rows(63, 5), self.MAPPING))
+        names = sorted(g["standardName"] for g in groups)
+        self.assertEqual(names, ["이엔에프테크놀로지", "제이케이머티리얼즈"])
+        for group in groups:
+            self.assertEqual(group["variantCount"], 1, group["standardName"])
+
+    def test_counts_split_solo_and_joint(self):
+        groups = {g["standardName"]: g
+                  for g in cluster_applicants(collect_applicants(self._rows(63, 5), self.MAPPING))}
+        lead = groups["이엔에프테크놀로지"]
+        partner = groups["제이케이머티리얼즈"]
+        self.assertEqual((lead["count"], lead["soloCount"], lead["jointCount"]), (68, 63, 5))
+        self.assertEqual((partner["count"], partner["soloCount"], partner["jointCount"]), (5, 0, 5))
+
+    def test_aligned_hints_are_still_used(self):
+        """대표명화 값 개수가 출원인 수와 맞으면 위치로 짝지어 사용한다."""
+        rows_ = [{"출원인": "삼성전자(주);LG전자", "대표명": "SAMSUNG ELECTRONICS;LG ELECTRONICS"}]
+        rows_ += [{"출원인": "SAMSUNG ELECTRONICS CO., LTD.", "대표명": "SAMSUNG ELECTRONICS"}]
+        groups = cluster_applicants(collect_applicants(rows_, self.MAPPING))
+        merged = [g for g in groups if g["variantCount"] > 1]
+        self.assertEqual(len(merged), 1)
+        self.assertEqual(merged[0]["standardName"], "삼성전자")
+        self.assertEqual(sorted(v["raw"] for v in merged[0]["variants"]),
+                         ["SAMSUNG ELECTRONICS CO., LTD.", "삼성전자(주)"])
+
+    def test_conflicting_codes_block_similarity_merge(self):
+        """WIPS 가 다른 회사로 판정한 것을 문자열 유사도로 뒤집지 않는다."""
+        mapping = {"applicant": {"column": "출원인"},
+                   "applicantNormalizedCode": {"column": "코드"}}
+        data = [{"출원인": "에이비씨테크놀로지 주식회사", "코드": "C1"},
+                {"출원인": "에이비씨테크놀로지스 주식회사", "코드": "C2"}]
+        groups = cluster_applicants(collect_applicants(data, mapping))
+        self.assertEqual(len(groups), 2, [g["standardName"] for g in groups])
 
 
 class ApplyToRecordsTest(unittest.TestCase):

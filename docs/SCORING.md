@@ -14,7 +14,8 @@
 | 규칙 | 구현 |
 |---|---|
 | 국가 커버리지 | `records.family_country_sources()` — 개별국 문헌 수 → 패밀리 문헌번호 → 자국 순. **지정국 코드는 제외**(실제 출원이 아님) |
-| 출원인 표준화 | `applicants.cluster_applicants()` — 사용자가 **승인**한 표준명만 `records.build_records(applicant_map=...)` 로 반영. 승인 전에는 원본 표기 사용 |
+| 출원인 표준화 | `applicants.cluster_applicants()` — 표준명은 한글 핵심 명칭 우선(`core_name()`). **그룹별로 승인**한 것만 `records.build_records(applicant_map=...)` 로 반영하며, 미승인 그룹은 원본 표기 사용 |
+| 공동출원 처리 | `applicants.collect_applicants()` — 출원인을 각각 세고, '대표명화' 값은 **출원인 수와 개수가 맞을 때만** 위치로 짝지어 사용(행 단위 값을 모든 출원인에게 붙이면 공동출원 파트너가 대표 출원인과 병합된다) |
 | 패밀리 대표문헌 | `family.build_families()` — 상태 우선순위 → 국가 우선순위 → 청구항 수 → 피인용 → 이른 우선일 |
 | 비교집단 | `peers.PeerIndex.rank()` — `Topic+연도` → `Topic+연도±N` → `Topic` → 전체, 표본 부족 시 중립 0.5 |
 | 비교집단 모집단 | **채점 단위(패밀리 대표문헌)**. 전체 문헌으로 구성하면 다국 출원 패밀리가 분포를 지배해 백분위가 왜곡된다 |

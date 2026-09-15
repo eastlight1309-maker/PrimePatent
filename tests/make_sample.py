@@ -43,6 +43,14 @@ APPLICANTS = [
     ("MICRON TECHNOLOGY, INC.", "MICRON", "US"),
     ("주식회사 에이피솔루션", "AP SOLUTION", "KR"),
 ]
+
+# 공동출원 파트너(소형 협력사). WIPS 는 공동출원 행에서도 '출원인 대표명화 영문명' 에
+# 대표 출원인 1곳만 적는 경우가 많아, 이 조합이 표준화 오병합을 재현하는 조건이 된다.
+CO_APPLICANTS = [
+    "주식회사 제이케이머티리얼즈",
+    "주식회사 이엔에프테크놀로지",
+    "한국화학연구원",
+]
 TOPICS = [
     ("하이브리드 본딩을 이용한 반도체 패키지", "미세 피치 하이브리드 본딩 구조로 접합 신뢰성을 개선한다.",
      "H01L24/05; H01L23/00; H01L25/065"),
@@ -81,6 +89,9 @@ def build_rows(count: int = 90, seed: int = 20260825):
         topic_index = random.randrange(len(TOPICS))
         title, abstract, cpc = TOPICS[topic_index]
         applicant, applicant_en, nationality = random.choice(APPLICANTS)
+        # 약 15% 를 공동출원으로 만든다(대표명화 컬럼은 대표 출원인만 기재).
+        co_applicant = random.choice(CO_APPLICANTS) if random.random() < 0.15 else ""
+        applicant_cell = applicant + (";" + co_applicant if co_applicant else "")
         year = random.choice([2012, 2015, 2017, 2018, 2019, 2019, 2020, 2021, 2022, 2023, 2024])
         countries = random.choice(COUNTRY_SETS)
         family_id = "WF%06d" % family_serial
@@ -123,7 +134,7 @@ def build_rows(count: int = 90, seed: int = 20260825):
                 "공개번호": doc.replace("10", "20", 1), "공개일": "%d-%02d-01" % (year + 1, 9),
                 "등록번호": doc.replace("10", "30", 1) if granted else "",
                 "등록일": "%d-%02d-01" % (year + 3, 3) if granted else "",
-                "출원인": applicant, "출원인 대표명화 영문명": applicant_en,
+                "출원인": applicant_cell, "출원인 대표명화 영문명": applicant_en,
                 "출원인 국적": nationality, "발명자": "홍길동;김철수",
                 "우선권 번호": members[0], "우선권 국가": countries[0], "우선권 주장일": priority,
                 "최우선출원일": priority,

@@ -29,6 +29,35 @@ def main():
         page.wait_for_selector("#pp-app-table tbody tr", timeout=30000)
         page.wait_for_timeout(500)
         print("2-1) 출원인 표준화:", " ".join(page.text_content("#pp-app-summary").split()))
+        first_row = page.locator("#pp-app-table tbody tr").first
+        print("     첫 그룹 표준명:", first_row.locator("input").input_value(),
+              "| 상태:", " ".join(first_row.locator("td").nth(3).text_content().split()))
+
+        # 그룹별 [변경] 버튼
+        first_row.locator("input").fill("표준명_수동변경")
+        first_row.get_by_role("button", name="변경").click()
+        page.wait_for_timeout(300)
+        print("     변경 버튼:", " ".join(page.text_content("#pp-toast").split())[:40])
+        page.locator("#pp-app-table tbody tr").first.get_by_role(
+            "button", name="추천값 복원").click()
+        page.wait_for_timeout(300)
+
+        # 그룹별 [승인] 버튼 - 승인 대기 그룹을 모두 승인한다
+        page.check("#pp-app-only-pending")
+        page.wait_for_timeout(300)
+        pending = page.locator("#pp-app-table tbody tr").count()
+        for _ in range(pending):
+            buttons = page.locator("#pp-app-table tbody tr").first.get_by_role("button",
+                                                                               name="승인")
+            if not buttons.count():
+                break
+            buttons.first.click()
+            page.wait_for_timeout(200)
+        page.uncheck("#pp-app-only-pending")
+        page.wait_for_timeout(300)
+        print("     그룹별 승인:", pending, "건 처리 · 남은 승인대기",
+              page.locator("#pp-app-summary .pp-metric").nth(3).text_content().replace("승인 대기", ""))
+
         page.click("#pp-app-approve")
         page.wait_for_timeout(1200)
         print("     승인:", " ".join(page.text_content("#pp-toast").split())[:40])

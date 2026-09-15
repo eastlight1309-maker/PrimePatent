@@ -181,9 +181,10 @@ class ApiFlowTest(unittest.TestCase):
         before = self.client.get("/api/jobs/%s/result?limit=500" % job_id).get_json()
         self.assertTrue(any("승인되지 않아" in w for w in before["warnings"]))
 
-        # 표준명을 바꿔 승인
+        # 표준명을 바꿔 승인(병합 그룹은 그룹별 승인이 필요하다)
         for group in groups:
             group["standardName"] = "표준_" + group["standardName"]
+            group["approved"] = True
         approved = self.client.post("/api/upload/%s/applicants/approve" % upload["uploadId"],
                                     json={"groups": groups})
         self.assertEqual(approved.status_code, 200, approved.data[:300])

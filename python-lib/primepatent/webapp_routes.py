@@ -398,8 +398,20 @@ def register_routes(app, state: Optional[AppState] = None) -> AppState:
         session.applicant_approved = True
         from .storage import now_iso
         session.applicant_approved_at = now_iso()
-        logger.info("출원인 표준화 승인: %s (%d개 표기)", upload_id, len(session.applicant_map))
-        return jsonify({"ok": True, "state": session.applicant_state()})
+
+        # 승인하지 않은 병합 그룹은 병합하지 않는다. 조용히 넘기지 않고 사실대로 알린다.
+        pending = [g for g in groups
+                   if len(g.get("variants") or []) > 1 and not g.get("approved", True)]
+        warning = ""
+        if pending:
+            warning = ("승인하지 않은 그룹 %d개는 병합하지 않고 원본 표기를 그대로 사용합니다: %s"
+                       % (len(pending),
+                          ", ".join(str(g.get("standardName") or g.get("groupId"))
+                                    for g in pending[:5])
+                          + (" 외" if len(pending) > 5 else "")))
+        logger.info("출원인 표준화 승인: %s (%d개 표기, 미승인 그룹 %d개)",
+                    upload_id, len(session.applicant_map), len(pending))
+        return jsonify({"ok": True, "state": session.applicant_state(), "warning": warning})
 
     @app.route("/api/upload/<upload_id>/applicants/reset", methods=["POST"])
     def api_applicants_reset(upload_id):

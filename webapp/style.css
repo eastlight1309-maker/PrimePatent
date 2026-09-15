@@ -176,6 +176,7 @@ textarea.pp-input { resize: vertical; width: 100%; }
 .pp-comp-score { font-variant-numeric: tabular-nums; }
 .pp-comp-detail { font-size: 11px; color: var(--pp-muted); margin-top: 4px; word-break: break-all; }
 .pp-comp-note { font-size: 11px; color: var(--pp-warn); margin-top: 3px; }
+.pp-hint { color: var(--pp-muted); font-size: 11px; margin-top: 4px; }
 .pp-variant-list { display: flex; flex-wrap: wrap; gap: 4px; }
 .pp-variant { background: #eef1f5; border-radius: 3px; padding: 1px 7px; font-size: 11px;
               display: inline-flex; align-items: center; gap: 5px; }
@@ -204,6 +205,7 @@ textarea.pp-input { resize: vertical; width: 100%; }
             background: #1c2430; color: #fff; max-width: 420px; }
 .pp-toast-ok { background: #1f8a55; }
 .pp-toast-err { background: var(--pp-danger); }
+.pp-toast-warn { background: var(--pp-warn); }
 
 /* ---------------------------------------------------------------- 설명 화면 */
 .pp-tab-help { margin-left: auto; color: var(--pp-primary); }

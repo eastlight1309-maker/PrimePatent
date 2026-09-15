@@ -70,9 +70,15 @@
       </div>
       <p class="pp-help">
         같은 회사가 <b>삼성전자(주) / 삼성전자 주식회사 / SAMSUNG ELECTRONICS CO., LTD.</b> 처럼
-        여러 표기로 나뉘어 있으면 출원인 기준 점수(시장 영향력·경쟁사 커버리지)가 모두 낮게 나옵니다.
-        아래 그룹을 검토해 표준명을 확정하고 <b>승인</b>하십시오.
-        <b>승인한 이후에만</b> 분석에 반영됩니다.
+        여러 표기로 나뉘어 있으면 출원인 기준 점수(시장 영향력)가 낮게 나옵니다.
+        표준명은 <b>한글 표기를 먼저</b> 추천하고, <b>주식회사 · Inc. · Co.,Ltd.</b> 같은
+        법인격 표기는 떼어 <b>핵심 명칭만</b> 남깁니다. 단독출원·공동출원 모두 각 출원인을 따로 셉니다.
+      </p>
+      <p class="pp-help">
+        <b>원본 표기</b> 열은 그 그룹(= 표준 출원인 1곳)으로 묶인 실제 엑셀 표기 목록이고,
+        뒤의 숫자는 그 표기가 등장한 문헌 수입니다. <b>×</b> 를 누르면 그 표기를 별도 출원인으로
+        분리합니다. 표기가 2개 이상인 그룹은 <b>[승인]</b> 을 눌러야 병합되며,
+        승인하지 않으면 원본 표기 그대로 분석됩니다.
       </p>
       <div id="pp-app-status" class="pp-status"></div>
       <div id="pp-app-summary" class="pp-summary-grid" hidden></div>
@@ -80,14 +86,17 @@
         <input type="search" id="pp-app-search" class="pp-input" placeholder="출원인명 검색">
         <label class="pp-check"><input type="checkbox" id="pp-app-only-merged" checked>
           병합된 그룹만 보기 (표기가 2개 이상)</label>
+        <label class="pp-check"><input type="checkbox" id="pp-app-only-pending">
+          승인 대기만 보기</label>
       </div>
       <div class="pp-table-scroll pp-table-tall">
         <table class="pp-table" id="pp-app-table">
           <thead><tr>
-            <th style="width:30%">표준명 (수정 가능)</th>
-            <th style="width:52%">원본 표기</th>
+            <th style="width:24%">표준명 (수정 가능)</th>
+            <th style="width:40%">원본 표기</th>
             <th style="width:9%">문헌</th>
-            <th style="width:9%">작업</th>
+            <th style="width:10%">상태</th>
+            <th style="width:17%">작업</th>
           </tr></thead>
           <tbody></tbody>
         </table>
