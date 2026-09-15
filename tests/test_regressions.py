@@ -3,7 +3,9 @@
 
 import io
 import os
+import shutil
 import sys
+import tempfile
 import threading
 import time
 import unittest
@@ -19,6 +21,8 @@ from primepatent.jobs import JobManager  # noqa: E402
 from primepatent.llm.analyzer import LLMCache  # noqa: E402
 from primepatent.parsing import to_date  # noqa: E402
 from primepatent.records import build_records  # noqa: E402
+from primepatent.storage import ensure_writable_dir, temp_dir_candidates  # noqa: E402
+from primepatent.uploads import UploadStore  # noqa: E402
 from primepatent.scoring.context import AnalysisContext  # noqa: E402
 from primepatent.scoring.engine import score_records  # noqa: E402
 from primepatent.status import remaining_term_years  # noqa: E402
@@ -304,6 +308,82 @@ class ExportInjectionTest(unittest.TestCase):
                     for line in sheet.iter_rows() for cell in line
                     if cell.data_type == "f"]
         self.assertEqual(formulas, [], "수식으로 해석되는 셀이 있습니다: %s" % formulas)
+
+
+class UploadTempDirTest(unittest.TestCase):
+    """업로드 임시 경로: 다른 계정 소유의 고정 경로에서 Permission denied 가 나면 안 된다.
+
+    실제 증상: 업로드 처리 중 오류 - [Errno 13] Permission denied:
+    '/tmp/primepatent_uploads/<id>'  (다른 계정이 먼저 만든 디렉터리에 걸림)
+    """
+
+    def setUp(self):
+        self._tmpdir = tempfile.mkdtemp(prefix="pp_regress_")
+        self.addCleanup(shutil.rmtree, self._tmpdir, True)
+
+    def test_candidates_prefer_account_specific_path(self):
+        candidates = temp_dir_candidates("primepatent_uploads")
+        plain = os.path.join(tempfile.gettempdir(), "primepatent_uploads")
+        self.assertNotEqual(candidates[0], plain,
+                            "첫 후보가 고정 경로이면 계정 충돌이 재발한다")
+        self.assertIn(plain, candidates, "예전 경로도 후보에는 남아 있어야 한다(호환)")
+
+    def _use_env_tmp(self, value):
+        previous = os.environ.get("PRIMEPATENT_TMP")
+        os.environ["PRIMEPATENT_TMP"] = value
+
+        def restore():
+            if previous is None:
+                os.environ.pop("PRIMEPATENT_TMP", None)
+            else:
+                os.environ["PRIMEPATENT_TMP"] = previous
+        self.addCleanup(restore)
+
+    def test_unusable_candidate_is_skipped(self):
+        """하위 디렉터리를 만들 수 없는 후보는 건너뛰고 다음 후보를 쓴다."""
+        blocked = os.path.join(self._tmpdir, "blocked")
+        with open(blocked, "wb") as handle:      # 디렉터리가 아니라 파일
+            handle.write(b"x")
+        good = os.path.join(self._tmpdir, "good")
+        resolved = ensure_writable_dir([blocked, good], purpose="테스트")
+        self.assertEqual(resolved, os.path.abspath(good))
+
+    @unittest.skipIf(getattr(os, "geteuid", lambda: 1)() == 0,
+                     "root 는 권한 비트를 무시하므로 이 조건을 재현할 수 없음")
+    def test_unwritable_candidate_is_skipped(self):
+        """소유자가 달라 쓸 수 없는 디렉터리(실제 증상)를 건너뛴다."""
+        blocked = os.path.join(self._tmpdir, "blocked_perm")
+        os.makedirs(blocked)
+        os.chmod(blocked, 0o500)                 # 읽기/실행만 - 하위 생성 불가
+        self.addCleanup(os.chmod, blocked, 0o700)
+        good = os.path.join(self._tmpdir, "good_perm")
+        self.assertEqual(ensure_writable_dir([blocked, good], purpose="테스트"),
+                         os.path.abspath(good))
+
+    def test_upload_store_falls_back_when_root_is_unusable(self):
+        blocked = os.path.join(self._tmpdir, "primepatent_uploads")
+        with open(blocked, "wb") as handle:
+            handle.write(b"x")
+        fallback = os.path.join(self._tmpdir, "fallback")
+        self._use_env_tmp(fallback)
+
+        store = UploadStore(root=blocked)
+        directory = store._new_upload_dir("abcdef123456")     # noqa: SLF001
+        self.assertTrue(os.path.isdir(directory))
+        self.assertEqual(os.path.dirname(directory), os.path.abspath(fallback),
+                         "쓸 수 없는 경로를 계속 쓰고 있습니다: %s" % directory)
+
+    def test_describe_does_not_raise(self):
+        store = UploadStore(root=os.path.join(self._tmpdir, "ok"))
+        info = store.describe()
+        self.assertIsNone(info["error"])
+        self.assertTrue(os.path.isdir(info["root"]))
+
+    def test_root_is_resolved_lazily(self):
+        """생성자에서 경로를 확보하면 임시 경로 문제로 백엔드 전체가 죽는다."""
+        store = UploadStore(root=os.path.join(self._tmpdir, "lazy"))
+        self.assertFalse(os.path.exists(os.path.join(self._tmpdir, "lazy")))
+        self.assertTrue(os.path.isdir(store.root))
 
 
 if __name__ == "__main__":

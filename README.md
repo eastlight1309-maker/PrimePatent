@@ -107,7 +107,20 @@ LLM 은 **LLM Mesh** 에 등록된 아래 4개만 사용합니다(`config.py` �
 | gpt-5.4 \| DW_AOAI_APIM_DES1_MID | `azureopenai:DW_AOAI_APIM_DES1_MID:gpt-5.4` |
 
 > 관리 폴더를 지정하지 않으면 DSS 서버 로컬 디렉터리(`.primepatent_store`)에 저장됩니다.
-> 환경변수 `PRIMEPATENT_FOLDER_ID`, `PRIMEPATENT_STORE` 로도 지정할 수 있습니다.
+
+환경변수
+
+| 변수 | 용도 | 기본값 |
+|---|---|---|
+| `PRIMEPATENT_FOLDER_ID` | 결과 저장용 관리 폴더 ID | (없음 → 로컬 디렉터리) |
+| `PRIMEPATENT_STORE` | 결과 저장 로컬 디렉터리 | `<작업디렉터리>/.primepatent_store` |
+| `PRIMEPATENT_TMP` | 업로드 임시 디렉터리 | `<임시디렉터리>/primepatent_uploads_<계정>` |
+| `PRIMEPATENT_LIB` | `primepatent` 패키지 경로(라이브러리 배치를 못 쓸 때) | (없음) |
+
+> 임시 디렉터리 이름에 계정 꼬리표가 붙는 이유: 여러 계정이 같은 DSS 서버를 쓰면
+> `/tmp/primepatent_uploads` 같은 고정 경로는 **먼저 만든 계정의 소유**가 되어
+> 다른 계정에서 `[Errno 13] Permission denied` 가 발생하기 때문입니다.
+> 현재 사용 중인 경로는 `/api/health` 응답의 `uploadRoot` 에서 확인할 수 있습니다.
 
 ## 3. 로컬 실행 (개발·검증용)
 

@@ -188,7 +188,11 @@ class DataikuFolderBackend(BaseBackend):
 
 
 def _is_writable(path: str) -> bool:
-    """디렉터리를 만들고 실제로 쓸 수 있는지 확인한다."""
+    """디렉터리를 만들고 실제로 쓸 수 있는지 확인한다.
+
+    os.access() 는 ACL/컨테이너 환경에서 실제 권한과 다르게 나오므로
+    **프로브 파일을 직접 써 본다.**
+    """
     try:
         os.makedirs(path, exist_ok=True)
         probe = os.path.join(path, ".pp_write_test")
@@ -199,6 +203,73 @@ def _is_writable(path: str) -> bool:
     except OSError as exc:
         logger.warning("저장 경로에 쓸 수 없습니다(%s): %s", path, exc)
         return False
+
+
+def _owner_tag() -> str:
+    """임시 경로 이름에 붙일 소유자 꼬리표.
+
+    /tmp/primepatent_uploads 처럼 **고정 이름**을 쓰면, 같은 서버에서 다른 계정이
+    먼저 그 디렉터리를 만들어 둔 경우 소유자가 달라 하위 디렉터리를 만들 수 없다
+    ([Errno 13] Permission denied). DSS 는 웹앱 백엔드를 실행 사용자 계정으로
+    띄우므로 계정이 섞이기 쉽다. 그래서 경로 이름 자체를 계정별로 나눈다.
+    """
+    getuid = getattr(os, "geteuid", None) or getattr(os, "getuid", None)
+    if getuid is not None:
+        try:
+            return "u%d" % getuid()
+        except OSError:
+            pass
+    try:
+        import getpass
+        return _SAFE_RE.sub("_", getpass.getuser())[:32] or "shared"
+    except Exception:                       # getpass 는 계정 조회 실패 시 예외를 던진다
+        return "shared"
+
+
+def temp_dir_candidates(name: str) -> List[str]:
+    """임시 디렉터리 후보를 우선순위대로 돌려준다(계정별 경로 우선)."""
+    import tempfile
+    base = tempfile.gettempdir()
+    tag = _owner_tag()
+    home = os.path.expanduser("~")
+    candidates = [os.path.join(base, "%s_%s" % (name, tag))]
+    if home and home != "~" and os.path.isdir(home):
+        candidates.append(os.path.join(home, ".primepatent", name))
+    candidates.append(os.path.join(base, name))     # 예전 고정 경로(우리 소유일 때만 통과)
+    return candidates
+
+
+def ensure_writable_dir(candidates: List[Optional[str]], purpose: str = "임시 디렉터리") -> str:
+    """후보 경로를 차례로 시도해 **실제로 쓸 수 있는** 디렉터리를 확보한다.
+
+    모두 실패하면 마지막 수단으로 고유 이름의 디렉터리를 새로 만든다
+    (새로 만든 디렉터리는 항상 현재 계정 소유이므로 권한 충돌이 없다).
+    그것마저 실패하면 시도한 경로를 모두 담아 StorageError 를 던진다.
+    """
+    tried: List[str] = []
+    for candidate in candidates:
+        if not candidate:
+            continue
+        try:
+            os.makedirs(candidate, mode=0o700, exist_ok=True)
+        except OSError as exc:
+            tried.append("%s (%s)" % (candidate, exc.strerror or exc))
+            continue
+        if _is_writable(candidate):
+            return os.path.abspath(candidate)
+        tried.append("%s (쓰기 권한 없음)" % candidate)
+
+    import tempfile
+    try:
+        path = tempfile.mkdtemp(prefix="primepatent_")
+        logger.warning("%s 확보 실패 → 고유 디렉터리(%s)를 새로 만들었습니다. 시도한 경로: %s",
+                       purpose, path, " | ".join(tried) or "(없음)")
+        return path
+    except OSError as exc:
+        raise StorageError(
+            "%s를 만들 수 없습니다: %s\n시도한 경로: %s\n"
+            "환경변수 PRIMEPATENT_TMP 에 쓰기 가능한 경로를 지정하십시오."
+            % (purpose, exc.strerror or exc, " | ".join(tried) or "(없음)")) from exc
 
 
 def make_backend(folder_id: Optional[str] = None, local_root: Optional[str] = None) -> BaseBackend:
@@ -222,8 +293,8 @@ def make_backend(folder_id: Optional[str] = None, local_root: Optional[str] = No
     root = local_root or os.environ.get("PRIMEPATENT_STORE") or \
         os.path.join(os.getcwd(), ".primepatent_store")
     if not _is_writable(root):
-        import tempfile
-        fallback = os.path.join(tempfile.gettempdir(), "primepatent_store")
+        fallback = ensure_writable_dir(temp_dir_candidates("primepatent_store"),
+                                       purpose="결과 저장 디렉터리")
         note = ("%s 경로에 쓸 수 없어 임시 디렉터리(%s)를 사용합니다. "
                 "서버 재시작 시 저장 결과가 사라질 수 있으므로 관리 폴더 사용을 권장합니다."
                 % (root, fallback))

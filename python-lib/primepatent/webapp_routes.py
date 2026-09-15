@@ -57,6 +57,8 @@ class AppState:
 
     def __init__(self, folder_id: Optional[str] = None, local_root: Optional[str] = None):
         self.jobs = JobManager()
+        # 임시 디렉터리는 첫 업로드 때 확보한다(UploadStore.root).
+        # 기동 시점에 확보하면 임시 경로 문제로 백엔드 전체가 뜨지 못한다.
         self.uploads = UploadStore()
         self.llm_cache = LLMCache()
         self.folder_id = folder_id
@@ -264,6 +266,9 @@ def register_routes(app, state: Optional[AppState] = None) -> AppState:
         degraded: List[str] = []
         if state.storage_error:
             degraded.append("저장소 사용 불가: %s" % state.storage_error)
+        upload_info = state.uploads.describe()
+        if upload_info.get("error"):
+            degraded.append("업로드 임시 디렉터리 사용 불가: %s" % upload_info["error"])
         for package in ("pandas", "openpyxl"):
             if not environment["packages"].get(package):
                 degraded.append("%s 패키지가 없어 엑셀 읽기/쓰기가 동작하지 않습니다." % package)
@@ -275,6 +280,8 @@ def register_routes(app, state: Optional[AppState] = None) -> AppState:
                                 if state.store else None),
             "storageNote": (state.store.backend.describe().get("note") if state.store else None),
             "storageError": state.storage_error,
+            "uploadRoot": upload_info.get("root"),
+            "uploadError": upload_info.get("error"),
             "environment": environment,
             "degraded": degraded,
             "llmCandidates": [{"label": label, "id": llm_id}

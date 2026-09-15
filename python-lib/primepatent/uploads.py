@@ -10,7 +10,6 @@ from __future__ import annotations
 import logging
 import os
 import shutil
-import tempfile
 import threading
 import time
 import uuid
@@ -18,7 +17,7 @@ from typing import Any, Dict, List, Optional
 
 from .ingest import IngestError, list_sheets, load_table
 from .mapping import auto_map, mapping_report
-from .storage import safe_name
+from .storage import StorageError, ensure_writable_dir, safe_name, temp_dir_candidates
 
 logger = logging.getLogger("primepatent.uploads")
 
@@ -73,12 +72,69 @@ class UploadSession:
 
 
 class UploadStore:
+    """업로드 임시 파일 보관소.
+
+    임시 경로는 **계정별로 나뉜 이름**을 쓴다. 고정 이름(/tmp/primepatent_uploads)을
+    쓰면 같은 서버의 다른 계정이 먼저 만들어 둔 디렉터리에 걸려
+    하위 디렉터리 생성이 [Errno 13] Permission denied 로 실패한다.
+    경로를 직접 지정하려면 환경변수 PRIMEPATENT_TMP 를 사용한다.
+    """
+
     def __init__(self, root: Optional[str] = None, ttl_sec: int = DEFAULT_TTL_SEC):
-        self.root = root or os.path.join(tempfile.gettempdir(), "primepatent_uploads")
-        os.makedirs(self.root, exist_ok=True)
+        self._root_hint = root
+        self._root: Optional[str] = None
         self.ttl_sec = ttl_sec
         self._sessions: Dict[str, UploadSession] = {}
         self._lock = threading.RLock()
+
+    @property
+    def root(self) -> str:
+        """쓸 수 있는 임시 디렉터리(첫 사용 시점에 확보한다).
+
+        웹앱 기동 시점에 확보하지 않는 이유: 임시 경로 문제로 백엔드 전체가
+        기동하지 못하면 원인 화면조차 뜨지 않기 때문이다.
+        """
+        if self._root is None:
+            self._root = self._resolve_root(self._root_hint)
+            logger.info("업로드 임시 디렉터리: %s", self._root)
+        return self._root
+
+    @staticmethod
+    def _resolve_root(root: Optional[str] = None) -> str:
+        candidates: List[Optional[str]] = [root, os.environ.get("PRIMEPATENT_TMP")]
+        candidates.extend(temp_dir_candidates("primepatent_uploads"))
+        return ensure_writable_dir(candidates, purpose="업로드 임시 디렉터리")
+
+    def describe(self) -> Dict[str, Any]:
+        """진단용. 경로 확보에 실패해도 예외를 던지지 않는다(/api/health 에서 호출)."""
+        try:
+            return {"root": self.root, "error": None}
+        except Exception as exc:
+            return {"root": None, "error": "%s: %s" % (type(exc).__name__, exc)}
+
+    def _new_upload_dir(self, upload_id: str) -> str:
+        """업로드 1건용 디렉터리를 만든다.
+
+        기동 후 디렉터리가 지워지거나(임시파일 청소) 권한이 바뀐 경우를 대비해
+        **한 번만** 경로를 다시 확보하고 재시도한다. 그래도 실패하면 원인을 그대로 알린다.
+        """
+        try:
+            directory = os.path.join(self.root, upload_id)
+            os.makedirs(directory, mode=0o700, exist_ok=True)
+            return directory
+        except (OSError, StorageError) as first:
+            logger.warning("업로드 디렉터리 생성 실패(%s) → 임시 경로를 다시 확보합니다.", first)
+            self._root = None
+            try:
+                directory = os.path.join(self.root, upload_id)
+                os.makedirs(directory, mode=0o700, exist_ok=True)
+            except (OSError, StorageError) as exc:
+                raise UploadError(
+                    "업로드 임시 디렉터리를 만들 수 없습니다: %s\n"
+                    "환경변수 PRIMEPATENT_TMP 에 쓰기 가능한 경로를 지정한 뒤 "
+                    "웹앱을 다시 시작하십시오." % exc) from exc
+            logger.info("업로드 임시 디렉터리를 %s 로 전환했습니다.", self._root)
+            return directory
 
     def save_upload(self, file_storage, sheet: Optional[str] = None) -> UploadSession:
         """Flask FileStorage 를 저장하고 헤더/자동매핑을 계산한다."""
@@ -90,8 +146,7 @@ class UploadStore:
 
         self.cleanup()
         upload_id = uuid.uuid4().hex[:12]
-        directory = os.path.join(self.root, upload_id)
-        os.makedirs(directory, exist_ok=True)
+        directory = self._new_upload_dir(upload_id)
         path = os.path.join(directory, name)
         try:
             file_storage.save(path)
